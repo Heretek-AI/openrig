@@ -29,6 +29,7 @@ import { StartupOrchestrator } from "../src/domain/startup-orchestrator.js";
 import type { RuntimeAdapter } from "../src/domain/runtime-adapter.js";
 import { WatchdogJobsRepository } from "../src/domain/watchdog-jobs-repository.js";
 import { WatchdogHistoryLog } from "../src/domain/watchdog-history-log.js";
+import { watchdogHistorySchema } from "../src/db/migrations/032_watchdog_history.js";
 import { WatchdogPolicyEngine, formatWatchdogDeliveryMessage } from "../src/domain/watchdog-policy-engine.js";
 import { ModelDivergenceMonitor } from "../src/domain/model-divergence/model-divergence-monitor.js";
 
@@ -2662,6 +2663,7 @@ describe("SessionTransport", () => {
     seedCanonicalRig();
     const sent: string[] = [];
     const transport = createTransport(mockTmux({ getPaneCommand: async () => "zsh", sendText: async (target) => { sent.push(target); return { ok: true }; } }));
+    migrate(db, [watchdogHistorySchema]); // watchdog suites migrate history inline
     const jobs = new WatchdogJobsRepository(db), history = new WatchdogHistoryLog(db);
     const engine = new WatchdogPolicyEngine({ jobsRepo: jobs, historyLog: history, eventBus: new EventBus(db), resolveTargetGeneration: () => "g1",
       // The deliver startup.ts wires.
