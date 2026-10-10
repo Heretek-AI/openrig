@@ -1395,6 +1395,10 @@ export interface SendOpts {
    *  renders as "[Pasted text #N +X lines]"; X must match this count for the placeholder to count
    *  as evidence of THIS piece. */
   expectedStagedLineCount?: number;
+  /** The text without the From/To envelope. When set and the recipient is a terminal seat
+   *  (`runtime: terminal`), send() types this instead of `text`, so the shell never runs the
+   *  envelope lines. Agent recipients keep `text`. */
+  exactText?: string;
 }
 
 // OPR.0.4.3.30 — options for the fan-out path (`broadcast()`). Superset of SendOpts.
@@ -1444,6 +1448,8 @@ export interface SendResult {
   sent?: boolean;
   /** Present only when transport.verify_input_box applied to this send. */
   inputBox?: InputBoxEvidence;
+  /** The recipient is a terminal seat, so `exactText` was typed without the From/To envelope. */
+  envelopeOmitted?: true;
 }
 
 /** One reading of a Claude Code or Codex input box: `exact` (the sent text, word boundaries kept), `ambiguous`
@@ -1889,6 +1895,15 @@ export class SessionTransport {
    * With verification requested, compare rendered message counts, excluding
    * agent input; a confirmed render does not prove agent consumption. */
   async send(sessionName: string, text: string, opts?: SendOpts): Promise<SendResult> {
+    // A terminal seat's shell would run the envelope lines as commands. Swap before the guard,
+    // whose outbox body, hash and delivery-ID identity all key on the text actually typed.
+    // Without the envelope there's no Sent: line, so stampISO is dropped too: the delivered-latency
+    // segment must never edit a line of the exact text.
+    if (opts?.exactText !== undefined) {
+      const { exactText, ...rest } = opts;
+      if (this.getSessionMeta(sessionName).runtime !== "terminal") return this.send(sessionName, text, rest);
+      return { ...(await this.send(sessionName, exactText, { ...rest, stampISO: undefined })), envelopeOmitted: true };
+    }
     const guard = this.tmuxAdapter.deliveryGuard;
     if (!guard) {
       const result = await this.sendUnguarded(sessionName, text, opts);
@@ -3255,6 +3270,7 @@ export class SessionTransport {
       // (h) thread the resolved stampISO so send()'s delivered-latency calc measures from the SAME
       // compose stamp the envelope carries (opts may not have carried one; the local stampISO is truth).
       const result = await this.send(session.sessionName, perRecipientText, { ...opts, stampISO,
+        exactText: opts?.envelopeSender ? text : undefined,
         deliveryId: opts?.deliveryId ? `${opts.deliveryId}:${session.sessionName}` : undefined });
       results.push(result);
     }
