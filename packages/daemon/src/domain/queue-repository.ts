@@ -3736,13 +3736,7 @@ export class QueueRepository {
     });
   }
 
-  /** OPR.0.5.6.14 — terminal transport is a CAPABILITY, not topology presence.
-   *  An exact session or composed canonical seat is pane-bound only when its
-   *  node carries an explicit tmux binding. external_cli is paneless and must
-   *  continue to the human-registry/gateway leg. FAIL-OPEN only where the DB
-   *  cannot carry classification evidence (empty/partial bootstrap schemas). */
-  /** The seat is a `runtime: terminal` node: by its newest session row, else by the composed
-   *  canonical name (`<logical id with dashes>@<rig>`), as {@link hasTerminalTransport} resolves it. */
+  /** A `runtime: terminal` node, by its newest session row or else its composed canonical name. */
   private isTerminalSeat(dest: string): boolean {
     try {
       const exact = this.db.prepare(
@@ -3762,6 +3756,11 @@ export class QueueRepository {
     }
   }
 
+  /** OPR.0.5.6.14 — terminal transport is a CAPABILITY, not topology presence.
+   *  An exact session or composed canonical seat is pane-bound only when its
+   *  node carries an explicit tmux binding. external_cli is paneless and must
+   *  continue to the human-registry/gateway leg. FAIL-OPEN only where the DB
+   *  cannot carry classification evidence (empty/partial bootstrap schemas). */
   private hasTerminalTransport(dest: string): boolean {
     try {
       const anyTopology = this.db.prepare("SELECT 1 FROM sessions LIMIT 1").get()
