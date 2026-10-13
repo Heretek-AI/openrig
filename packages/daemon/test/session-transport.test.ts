@@ -543,10 +543,10 @@ describe("SessionTransport", () => {
     });
   }
 
-  function seedCanonicalRig() {
+  function seedCanonicalRig(runtime = "claude-code") {
     const rig = rigRepo.createRig("my-rig");
     const node = rigRepo.addNode(rig.id, "dev.impl", {
-      role: "worker", runtime: "claude-code",
+      role: "worker", runtime,
     });
     const session = sessionRegistry.registerSession(node.id, "dev-impl@my-rig");
     sessionRegistry.updateStatus(session.id, "running");
@@ -892,6 +892,34 @@ describe("SessionTransport", () => {
     const result = await createTransport(tmux, { sleep: async () => undefined })
       .send("dev-impl@my-rig", message, { verify: true });
     expect(result).toMatchObject({ ok: true, verified: false, outcome: "rendered-unconfirmed" });
+  });
+
+  it.each(["❯", "›", "»"].flatMap(glyph =>
+    ["raw staged", "raw submitted", "envelope staged", "envelope submitted", "quoted draft", "quoted prompt in draft", "after reply", "flat transcript boundary"]
+      .map(mode => [glyph, mode] as const),
+  ))("send verification recognises composer %s: %s", async (glyph, mode) => {
+    seedCanonicalRig(glyph === "❯" ? "claude-code" : "codex");
+    const message = mode.startsWith("raw") ? "Please check this task."
+      : "From: sender-agent@demo\nTo: dev-impl@my-rig\n---\nPlease check this task.";
+    const render = (text: string) => glyph + " " + text.split("\n").join("\n  ");
+    const verified = mode === "raw submitted" || mode === "envelope submitted" || mode === "after reply" || mode === "flat transcript boundary";
+    let submitted = false;
+    const tmux = mockTmux({
+      sendKeys: async () => { submitted = true; return { ok: true }; },
+      capturePaneContent: async () => {
+        if (!submitted) return "Prior output\n" + glyph + " ";
+        if (mode === "quoted draft") return glyph + " Check this envelope:\n  " + message.split("\n").join("\n  ");
+        if (mode === "quoted prompt in draft") return render(message) + "\n  " + glyph + " quoted prompt";
+        if (mode === "flat transcript boundary") return message + "\n" + glyph + " previous input\nAgent reply\n" + glyph + " ";
+        const previous = mode === "after reply"
+          ? render(message.replace("Please check this task.", "A different task.")) + "\nAgent reply\n" : "";
+        return previous + render(message) + (verified ? "\n" + glyph + " " : "");
+      },
+    });
+    const result = await createTransport(tmux, { sleep: async () => undefined })
+      .send("dev-impl@my-rig", message, { verify: true });
+    expect(result).toMatchObject({ ok: true, verified,
+      outcome: verified ? "delivered" : "rendered-unconfirmed" });
   });
 
   // OPR.99.0.6.3 — honest delivery-outcome vocabulary
