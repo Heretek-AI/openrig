@@ -9,6 +9,7 @@ import {
   COMPOSER_DRAFT_PATTERN,
   COMPOSER_EMPTY_CODEX_PLACEHOLDER_PATTERN as CODEX_EMPTY_COMPOSER_PATTERN,
   COMPOSER_EMPTY_PATTERN,
+  COMPOSER_PROMPT_CLASS,
   COMPOSER_SELECTION_PATTERN,
   COMPOSER_SELECTION_SCAN_PATTERN,
   findComposerInputLineIndex,
@@ -679,6 +680,10 @@ function verificationSnippet(text: string): { snippet: string; envelope: boolean
   return { snippet: header ? normalized.replace(/\s+/g, " ").trim() : normalized.slice(0, 40), envelope: !!header };
 }
 
+const VERIFICATION_PROMPT_PREFIX = new RegExp(`^[${COMPOSER_PROMPT_CLASS}]\\s+`);
+const VERIFICATION_PROMPT_BOUNDARY = new RegExp(`^[${COMPOSER_PROMPT_CLASS}](?:\\s|$)`);
+const VERIFICATION_INDENTED_PROMPT = new RegExp(`^([ \\t]*)[${COMPOSER_PROMPT_CLASS}]`);
+
 /** Count whole visible envelope blocks, not prefixes of longer messages.
  * A new envelope, prompt or same-column output ends an indented user block.
  * Whitespace is compared only after retaining boundaries and quote indentation. */
@@ -696,8 +701,8 @@ function countEnvelopeOccurrences(transcript: string, expected: string): number 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     const indent = /^[ \t]*/.exec(line)![0].length;
-    const prompted = /^[❯›]\s+/.test(line.slice(indent));
-    const header = line.slice(indent).replace(/^[❯›]\s+/, "");
+    const prompted = VERIFICATION_PROMPT_PREFIX.test(line.slice(indent));
+    const header = line.slice(indent).replace(VERIFICATION_PROMPT_PREFIX, "");
     const atBoundary = (!block && !inAgentOutput) || indent <= blockIndent;
     const candidate = normalizeVerificationText([header, ...lines.slice(i + 1, i + 5)].join("\n"));
     const envelopeHeader = /^From: [^\n]+\nTo: [^\n]+\n(?:Sent: [^\n]+\n)?---\n/.test(candidate);
@@ -714,7 +719,7 @@ function countEnvelopeOccurrences(transcript: string, expected: string): number 
       // quotes stay in the body, and blank separators do not change its text.
       finish();
       inAgentOutput = true;
-    } else if (atBoundary && /^[❯›](?:\s|$)/.test(line.slice(indent))) {
+    } else if (atBoundary && VERIFICATION_PROMPT_BOUNDARY.test(line.slice(indent))) {
       finish();
     } else if (block) {
       block.push(line);
@@ -729,13 +734,13 @@ function countEnvelopeOccurrences(transcript: string, expected: string): number 
  * ends at a historical prompt with no later input marker, leave it unconfirmed. */
 function verificationTranscript(content: string | null): string {
   const lines = (content ?? "").replace(/\r\n/g, "\n").split("\n");
-  let inputAt = lastPromptLine(lines);
+  let inputAt = findComposerInputLineIndex(lines);
   if (inputAt >= 0) {
     let indent = /^[ \t]*/.exec(lines[inputAt]!)![0].length;
     // Claude indents draft continuation lines. A quoted prompt on one of them
     // belongs to the enclosing input, not a new transcript/composer boundary.
     for (let i = inputAt - 1; i >= 0; i--) {
-      const prompt = /^([ \t]*)[❯›]/.exec(lines[i]!);
+      const prompt = VERIFICATION_INDENTED_PROMPT.exec(lines[i]!);
       if (prompt && prompt[1]!.length < indent) {
         inputAt = i;
         indent = prompt[1]!.length;
