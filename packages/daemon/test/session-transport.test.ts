@@ -922,6 +922,39 @@ describe("SessionTransport", () => {
       outcome: verified ? "delivered" : "rendered-unconfirmed" });
   });
 
+  it.each([
+    ["raw", "same-column below draft"], ["raw", "below framed draft"],
+    ["envelope", "same-column below draft"], ["envelope", "below framed draft"],
+    ["envelope", "assistant quoted envelope"],
+    ["envelope", "flat body »"], ["envelope", "flat body ›"], ["envelope", "flat body ❯"],
+  ])("Claude verification keeps existing boundaries: %s %s", async (kind, shape) => {
+    const rig = rigRepo.createRig("verification");
+    const node = rigRepo.addNode(rig.id, "worker", { role: "worker", runtime: "claude-code" });
+    const address = "worker@verification";
+    const session = sessionRegistry.registerSession(node.id, address);
+    sessionRegistry.updateStatus(session.id, "running");
+    sessionRegistry.updateBinding(node.id, { tmuxSession: address });
+    let message = kind === "raw" ? "Check the blue ledger, then report its total."
+      : `From: sender@fixture\nTo: ${address}\nSent: 10-13 10:00Z\n---\nCheck the blue ledger.\nReport its total.\n---\n↩ Reply: rig send sender@fixture "..."`;
+    const render = (glyph: string, text: string) => glyph + " " + text.split("\n").join("\n  ");
+    let post = render("❯", message) + "\n» reply quotation below live input";
+    if (shape === "below framed draft") post = "────────────────────\n" + render("❯", message) + "\n────────────────────\n? for shortcuts\n» later quote";
+    if (shape === "assistant quoted envelope") post = "❯ Different request\nAssistant reply with quotation:\n" + render("»", message) + "\n❯ ";
+    if (shape.startsWith("flat body")) {
+      message = message.replace("Check the blue ledger.", shape.slice(-1) + " Check the blue ledger.");
+      post = message + "\n❯ ";
+    }
+    let submitted = false;
+    const tmux = mockTmux({
+      sendKeys: async () => { submitted = true; return { ok: true }; },
+      capturePaneContent: async () => submitted ? post : "❯ ",
+    });
+    const result = await createTransport(tmux, { sleep: async () => undefined }).send(address, message, { verify: true });
+    const verified = shape === "flat body »";
+    expect(result).toMatchObject({ ok: true, verified,
+      outcome: verified ? "delivered" : "rendered-unconfirmed" });
+  });
+
   // OPR.99.0.6.3 — honest delivery-outcome vocabulary
   it("verify capture throwing after a successful send is the middle outcome, not a failure", async () => {
     seedCanonicalRig();
