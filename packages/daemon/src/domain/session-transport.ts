@@ -680,14 +680,12 @@ function verificationSnippet(text: string): { snippet: string; envelope: boolean
   return { snippet: header ? normalized.replace(/\s+/g, " ").trim() : normalized.slice(0, 40), envelope: !!header };
 }
 
-const VERIFICATION_PROMPT_PREFIX = new RegExp(`^[${COMPOSER_PROMPT_CLASS}]\\s+`);
-const VERIFICATION_PROMPT_BOUNDARY = new RegExp(`^[${COMPOSER_PROMPT_CLASS}](?:\\s|$)`);
-const VERIFICATION_INDENTED_PROMPT = new RegExp(`^([ \\t]*)[${COMPOSER_PROMPT_CLASS}]`);
-
 /** Count whole visible envelope blocks, not prefixes of longer messages.
  * A new envelope, prompt or same-column output ends an indented user block.
  * Whitespace is compared only after retaining boundaries and quote indentation. */
-function countEnvelopeOccurrences(transcript: string, expected: string): number {
+function countEnvelopeOccurrences(transcript: string, expected: string, promptClass: string): number {
+  const promptPrefix = new RegExp(`^[${promptClass}]\\s+`);
+  const promptBoundary = new RegExp(`^[${promptClass}](?:\\s|$)`);
   const lines = transcript.split("\n");
   let count = 0;
   let block: string[] | null = null;
@@ -701,8 +699,8 @@ function countEnvelopeOccurrences(transcript: string, expected: string): number 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     const indent = /^[ \t]*/.exec(line)![0].length;
-    const prompted = VERIFICATION_PROMPT_PREFIX.test(line.slice(indent));
-    const header = line.slice(indent).replace(VERIFICATION_PROMPT_PREFIX, "");
+    const prompted = promptPrefix.test(line.slice(indent));
+    const header = line.slice(indent).replace(promptPrefix, "");
     const atBoundary = (!block && !inAgentOutput) || indent <= blockIndent;
     const candidate = normalizeVerificationText([header, ...lines.slice(i + 1, i + 5)].join("\n"));
     const envelopeHeader = /^From: [^\n]+\nTo: [^\n]+\n(?:Sent: [^\n]+\n)?---\n/.test(candidate);
@@ -719,7 +717,7 @@ function countEnvelopeOccurrences(transcript: string, expected: string): number 
       // quotes stay in the body, and blank separators do not change its text.
       finish();
       inAgentOutput = true;
-    } else if (atBoundary && VERIFICATION_PROMPT_BOUNDARY.test(line.slice(indent))) {
+    } else if (atBoundary && promptBoundary.test(line.slice(indent))) {
       finish();
     } else if (block) {
       block.push(line);
@@ -732,15 +730,16 @@ function countEnvelopeOccurrences(transcript: string, expected: string): number 
 /** The last prompt marker owns the current input region. Never count it or its
  * continuation lines as submitted transcript, in either capture. If a capture
  * ends at a historical prompt with no later input marker, leave it unconfirmed. */
-function verificationTranscript(content: string | null): string {
+function verificationTranscript(content: string | null, promptClass: string): string {
+  const indentedPrompt = new RegExp(`^([ \\t]*)[${promptClass}]`);
   const lines = (content ?? "").replace(/\r\n/g, "\n").split("\n");
-  let inputAt = findComposerInputLineIndex(lines);
+  let inputAt = findComposerInputLineIndex(lines, promptClass);
   if (inputAt >= 0) {
     let indent = /^[ \t]*/.exec(lines[inputAt]!)![0].length;
     // Claude indents draft continuation lines. A quoted prompt on one of them
     // belongs to the enclosing input, not a new transcript/composer boundary.
     for (let i = inputAt - 1; i >= 0; i--) {
-      const prompt = VERIFICATION_INDENTED_PROMPT.exec(lines[i]!);
+      const prompt = indentedPrompt.exec(lines[i]!);
       if (prompt && prompt[1]!.length < indent) {
         inputAt = i;
         indent = prompt[1]!.length;
@@ -2102,9 +2101,12 @@ export class SessionTransport {
         // its original prefix-count verification even while a command is running.
         const terminal = runtime === "terminal";
         const { snippet, envelope } = terminal ? { snippet: text.slice(0, 40), envelope: false } : verificationSnippet(text);
+        // Keep Claude's existing verification boundaries; Codex also draws ».
+        const promptClass = runtime === "claude-code" ? "❯›" : COMPOSER_PROMPT_CLASS;
         const transcript = terminal ? (pane: string | null) => pane ?? ""
-          : envelope ? verificationTranscript : (pane: string | null) => normalizeVerificationText(verificationTranscript(pane));
-        const count = envelope ? countEnvelopeOccurrences : countOccurrences;
+          : (pane: string | null) => envelope ? verificationTranscript(pane, promptClass)
+            : normalizeVerificationText(verificationTranscript(pane, promptClass));
+        const count = envelope ? (pane: string, expected: string) => countEnvelopeOccurrences(pane, expected, promptClass) : countOccurrences;
         const preCount = count(transcript(preVerifyContent), snippet);
         const postCount = count(transcript(content), snippet);
         const verified = postCount > preCount;
