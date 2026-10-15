@@ -146,3 +146,62 @@ describe("quoted permission history preservation", () => {
     }
   });
 });
+
+// Synthetic ambiguity and timerless-work controls: none supplies a completed-status boundary.
+describe("quoted permission history keeps ambiguous and timerless panes guarded", () => {
+  const cases = [
+    [
+      "ambiguous-instruction",
+      "Do you want to proceed?\nPress Enter to confirm\n──────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────\n  ⏵⏵ accept edits on (shift+tab to cycle)",
+    ],
+    [
+      "ambiguous-flat-option",
+      "Do you want to proceed?\n1. Yes\n──────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────\n  ⏵⏵ accept edits on (shift+tab to cycle)",
+    ],
+    [
+      "ambiguous-bordered-detail",
+      "Do you want to proceed?\n│ Current request\n──────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────\n  ⏵⏵ accept edits on (shift+tab to cycle)",
+    ],
+    [
+      "ambiguous-footer",
+      "Do you want to proceed?\nEnter to select · ↑/↓ to navigate · Esc to cancel\n──────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────\n  ⏵⏵ accept edits on (shift+tab to cycle)",
+    ],
+    [
+      "selector-historical-footer",
+      "Do you want to proceed?\n❯ 1. Yes\n  2. No\nEnter to select · ↑/↓ to navigate · Esc to cancel\n──────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────\n  ⏵⏵ accept edits on (shift+tab to cycle)",
+    ],
+    [
+      "live-timerless",
+      "● Earlier report quoted: Do you want to proceed?\n✻ Thinking…\n──────────────────────────────────────────────────\n❯ \n──────────────────────────────────────────────────\n  ⏵⏵ accept edits on (shift+tab to cycle)",
+    ],
+  ] as const;
+  it.each(cases)("%s: default and strict consumers keep the permission refusal", async (_name, pane) => {
+    for (const timerlessStatusIsLive of [false, true]) {
+      expect(classifyPaneActivity(pane, { timerlessStatusIsLive }))
+        .toMatchObject({ state: "attention", reason: "permission_prompt" });
+      const f = fixture(pane);
+      expect(await probeSessionActivity({ sessionName: SEAT, runtime: "claude-code", attachmentType: "tmux",
+        tmuxAdapter: f.tmux, now: NOW, timerlessStatusIsLive }))
+        .toMatchObject({ state: "needs_input", reason: "permission_prompt" });
+    }
+    const f = fixture(pane);
+    expect(await f.transport.send(SEAT, "ordinary message"))
+      .toMatchObject({ ok: false, reason: "target_needs_input" });
+    expect(await f.transport.send(SEAT, "pane-only message", { waitForIdleMs: 100, readinessFromPaneOnly: true }))
+      .toMatchObject({ ok: false, reason: "target_needs_input" });
+    expect(await f.transport.waitUntilIdle(SEAT, 100))
+      .toMatchObject({ ok: false, reason: "target_needs_input" });
+    const service = new SeatStructuralActivityService(f.tmux, () => NOW);
+    expect(await service.pollSeat(SEAT)).toMatchObject({ state: "attention", reason: "permission_prompt" });
+    expect(service.getStructuralActivity(SEAT)?.state).toBe("attention");
+    for (const age of [90_000, 360_000]) {
+      f.hooks.recordHookEvent({ runtime: "claude-code", sessionName: SEAT, hookEvent: "Notification",
+        subtype: "permission_prompt", occurredAt: new Date(NOW.getTime() - age).toISOString() });
+      expect(await f.transport.send(SEAT, "ordinary message with an old hook"))
+        .toMatchObject({ ok: false, reason: "target_needs_input" });
+      expect(await f.transport.send(SEAT, "pane-only message with an old hook", { waitForIdleMs: 100, readinessFromPaneOnly: true }))
+        .toMatchObject({ ok: false, reason: "target_needs_input" });
+    }
+    expect(f.sendText).not.toHaveBeenCalled(); expect(f.sendKeys).not.toHaveBeenCalled();
+  });
+});

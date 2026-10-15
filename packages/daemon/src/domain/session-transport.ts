@@ -367,11 +367,13 @@ export function classifyPaneActivity(paneContent: string, options: ClassifyPaneO
   // not in view — checked before the idle short-circuits so a permission block above an idle-looking
   // footer never reads as idle (which would let a default send land on it).
   // A complete, empty Claude frame can separate completed output from its current status block.
-  // Keep that block (including a permission question at its head) in the scan. A bare prompt,
-  // draft, live status, unsupported footer or exhausted status scan proves no such boundary.
+  // Require a recognized completed summary, not merely an unindented row. Keep a current question
+  // in the scan. A bare prompt, draft, live status, unsupported footer or exhausted status scan
+  // proves no such boundary.
   const permissionLines = claudeComposer?.framed && claudeComposer.headSeen && !claudeComposer.liveStatus &&
       CLAUDE_ANCHORED_MODE_FOOTER.test(claudeComposer.bar) &&
-      IDLE_PROMPT_PATTERNS.some(pattern => pattern.test(claudeComposer.text))
+      IDLE_PROMPT_PATTERNS.some(pattern => pattern.test(claudeComposer.text)) &&
+      CLAUDE_COMPLETED_STATUS_ROW.test(claudeComposer.currentLines[0]?.trim() ?? "")
     ? claudeComposer.currentLines.slice(-PROMPT_SCAN_LINES) : promptScanLines;
   const permissionPromptEvidence = findPatternEvidence(permissionLines, PERMISSION_PROMPT_PATTERNS);
   if (permissionPromptEvidence) {
@@ -1144,6 +1146,9 @@ const CLAUDE_DURATION = `(?:0\\.0s|${CLAUDE_SIXTY}s|${CLAUDE_NONZERO_SIXTY}m ${C
   + `|${CLAUDE_NONZERO_HOURS}h ${CLAUDE_SIXTY}m ${CLAUDE_SIXTY}s|[1-9][0-9]*d ${CLAUDE_HOURS}h ${CLAUDE_SIXTY}m)`;
 const CLAUDE_CLOCK = "(?:(?:[1-9]|1[0-2]):[0-5][0-9] [AP]M|(?:[01][0-9]|2[0-3]):[0-5][0-9]Z?)";
 const CLAUDE_COMPLETION_ROW = new RegExp(`^✻ (?:${CLAUDE_COMPLETION_VERBS.join("|")}) for ${CLAUDE_DURATION} · done ${CLAUDE_CLOCK}$`);
+// Permission-history boundaries also accept the older short completed summaries in warning-footer
+// layouts. Reuse the completion grammar; the input-box idle allow-list above remains exact.
+const CLAUDE_COMPLETED_STATUS_ROW = new RegExp(`^✻ (?:${CLAUDE_COMPLETION_VERBS.join("|")}) for ${CLAUDE_DURATION}(?: · done ${CLAUDE_CLOCK})?$`);
 
 /** The idle allow-list. Each entry comes from real Claude Code 2.1.296 and Codex 0.160.0 frames
  *  (test/fixtures/input-box, including idle seats OpenRig launched: openrig-seat-*), or, where no frame was captured,
