@@ -217,8 +217,10 @@ function findClaudeComposer(paneContent: string, options: ClassifyPaneOptions = 
 
   let liveStatus: string | null = null;
   let headSeen = false;
+  let statusHead = statusStart;
   for (let i = statusStart; i >= 0; i--) {
     if (!lines[i]!.startsWith(indent)) break;
+    statusHead = i;
     const line = lines[i]!.slice(indent.length);
     const livePatterns = options.timerlessStatusIsLive
       ? [CLAUDE_LIVE_STATUS_PATTERN, CLAUDE_TIMERLESS_STATUS_PATTERN, ...MID_WORK_PATTERNS]
@@ -232,7 +234,7 @@ function findClaudeComposer(paneContent: string, options: ClassifyPaneOptions = 
     // or completed status ends this block; do not revive an older work row.
     if (!/^\s/.test(line)) { headSeen = true; break; }
   }
-  return { text: prompt.slice(indent.length), bar: lines[bar]!.trim(), framed, hasWarnings: bar < lines.length - 1, supportedWarningFooter, modeFooter, headSeen, liveStatus };
+  return { text: prompt.slice(indent.length), bar: lines[bar]!.trim(), framed, hasWarnings: bar < lines.length - 1, supportedWarningFooter, modeFooter, headSeen, liveStatus, currentLines: lines.slice(statusHead) };
 }
 
 function findPromptDraftBeforeFooter(paneContent: string): string | null {
@@ -364,7 +366,14 @@ export function classifyPaneActivity(paneContent: string, options: ClassifyPaneO
   // OPR.0.4.1.10 (FR-1c): a permission/confirmation question is attention even when its selector is
   // not in view — checked before the idle short-circuits so a permission block above an idle-looking
   // footer never reads as idle (which would let a default send land on it).
-  const permissionPromptEvidence = findPatternEvidence(promptScanLines, PERMISSION_PROMPT_PATTERNS);
+  // A complete, empty Claude frame can separate completed output from its current status block.
+  // Keep that block (including a permission question at its head) in the scan. A bare prompt,
+  // draft, live status, unsupported footer or exhausted status scan proves no such boundary.
+  const permissionLines = claudeComposer?.framed && claudeComposer.headSeen && !claudeComposer.liveStatus &&
+      CLAUDE_ANCHORED_MODE_FOOTER.test(claudeComposer.bar) &&
+      IDLE_PROMPT_PATTERNS.some(pattern => pattern.test(claudeComposer.text))
+    ? claudeComposer.currentLines.slice(-PROMPT_SCAN_LINES) : promptScanLines;
+  const permissionPromptEvidence = findPatternEvidence(permissionLines, PERMISSION_PROMPT_PATTERNS);
   if (permissionPromptEvidence) {
     return {
       state: "attention",
