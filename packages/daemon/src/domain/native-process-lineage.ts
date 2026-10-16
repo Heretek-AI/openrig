@@ -597,6 +597,22 @@ export async function verifyClaudePaneRuntime(input: Parameters<typeof observeCl
   return second?.fingerprint === first.fingerprint ? second : null;
 }
 
+const NATIVE_VERSION_LABEL = /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/;
+
+/** #86: the native installer names Claude's process, and so the pane label, after its versioned file. Whether that
+ * label may stand for `claude`: only when the pane's one stable foreground Claude is the version-named process
+ * itself, witnessed by its OS executable path (`claudeProcess`: argv0 claude, the installer's versions layout, a
+ * basename equal to the OS name), and the pane's pid is unchanged. The label alone is never identity, and a path
+ * read that fails or times out is no witness. Like a `claude` label, this says nothing about the conversation. */
+export async function witnessedClaudeVersionLabel(paneCommand: string | null,
+  input: Omit<Parameters<typeof observeClaudePaneRuntime>[0], "selectedExecutable">): Promise<boolean> {
+  const label = paneCommand?.trim() ?? "";
+  if (!NATIVE_VERSION_LABEL.test(label)) return false;
+  const native = await verifyClaudePaneRuntime(input);
+  if (!native || native.process.executableName !== label || !native.process.executablePath) return false;
+  return await input.tmux.getPanePid(input.target).catch(() => null) === native.panePid;
+}
+
 /** The `ps` start time (lstart, local time) of the one stable Claude foreground
  * process. This makes no claim about its conversation token. */
 export async function observeClaudePaneStartedAt(input: Parameters<typeof observeClaudePaneRuntime>[0]): Promise<string | null> {

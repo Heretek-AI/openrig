@@ -13,7 +13,7 @@ import type {
 import { resolveConcreteHint } from "../domain/runtime-adapter.js";
 import type { ProjectionPlan, ProjectionEntry } from "../domain/projection-planner.js";
 import { assessNativeResumeProbe } from "../domain/native-resume-probe.js";
-import { observeClaudePaneProcess, type ClaudeLaunchedProcess, type NativeProcessLister } from "../domain/native-process-lineage.js";
+import { observeClaudePaneProcess, witnessedClaudeVersionLabel, type ClaudeLaunchedProcess, type NativeProcessLister } from "../domain/native-process-lineage.js";
 import { mergeManagedBlock, DEFAULT_CLAUDE_MANAGED_BLOCK_FILE, type ClaudeManagedBlockFile } from "../domain/managed-blocks.js";
 import { claudeResumeLaunchEnv, claudeResumeLaunchPrefix } from "./claude-resume-launch.js";
 import { shellQuote } from "./shell-quote.js";
@@ -383,6 +383,13 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   private async assessManagedProbe(binding: NodeBinding, paneCommand: string | null, paneContent: string) {
     const input = { runtime: "claude-code", paneCommand, paneContent };
     const probe = assessNativeResumeProbe(input);
+    // #86: an unmanaged native install's version label reads as `claude` once its OS executable is witnessed. The
+    // witness runs only when the label would change the result; a managed launch keeps its exact proof below.
+    const asClaude = assessNativeResumeProbe({ ...input, paneCommand: "claude" });
+    if (probe.status !== "resumed" && asClaude.status === "resumed" && binding.permissionMode === undefined && binding.tmuxSession
+      && await witnessedClaudeVersionLabel(paneCommand, { target: binding.tmuxSession, tmux: this.tmux, listProcesses: this.listProcesses })) {
+      return asClaude;
+    }
     // Headerless managed launches (including bypass mode) use the same readiness
     // precedence as resume. This candidate result is returned only after the
     // exact launch identity below is proved; screen text alone is insufficient.
