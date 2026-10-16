@@ -609,7 +609,9 @@ export async function witnessedClaudeVersionLabel(paneCommand: string | null,
   const label = paneCommand?.trim() ?? "";
   if (!NATIVE_VERSION_LABEL.test(label)) return false;
   const native = await verifyClaudePaneRuntime(input);
-  if (!native || native.process.executableName !== label || !native.process.executablePath) return false;
+  // argv0 `claude` keeps the OS path the deciding evidence: a versioned argv0 matches the OS name without it.
+  if (!native || executableName(tokens(native.process.command)[0] ?? "") !== "claude"
+    || native.process.executableName !== label || !native.process.executablePath) return false;
   return await input.tmux.getPanePid(input.target).catch(() => null) === native.panePid;
 }
 

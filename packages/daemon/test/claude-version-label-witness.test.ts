@@ -84,6 +84,7 @@ describe("#86 refusals that stay refused", () => {
     // listNativeProcesses leaves the path unset when the OS read fails or times out.
     ["a path read that failed or timed out", rows().map(r => ({ ...r, executablePath: undefined }))],
     ["argv0 naming the native path, with no OS path read", rows(`${NATIVE_PATH} --resume tok`).map(r => ({ ...r, executablePath: undefined }))],
+    ["argv0 naming the native path, with an unrelated OS path", rows(`${NATIVE_PATH} --resume tok`).map(r => r.pid === 12 ? { ...r, executablePath: "/opt/other/claude" } : r)],
     ["a background process", rows().map(r => r.pid === 12 ? { ...r, pgid: 88 } : r)],
     ["a label naming a different version", rows(), "2.1.301"],
     ["a pane pid change after the samples", rows(), VERSION, vi.fn<() => Promise<number | null>>()
