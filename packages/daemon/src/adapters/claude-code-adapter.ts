@@ -58,6 +58,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
   private collectorAssetPath: string | null;
   private autoDriveProviderPrompts: boolean;
   private listProcesses?: NativeProcessLister;
+  private resolvePermissionMode?: (nodeId: string) => string | undefined;
   private autoLaunches = new Map<string, { binding: NodeBinding; token: string; executable?: string; fingerprint?: string; process?: ClaudeLaunchedProcess }>();
   readonly claudeManagedLaunch?: ClaudeManagedLaunch;
   private activityRelayPath: string | null;
@@ -76,6 +77,9 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     collectorAssetPath?: string;
     autoDriveProviderPrompts?: boolean;
     listProcesses?: NativeProcessLister;
+    /** #86 — the seat's persisted managed permission mode (NativePermissionStore.resolve), undefined when
+     *  unmanaged; throws when it can't be read. Absent → every seat counts as managed for the version-label witness. */
+    resolvePermissionMode?: (nodeId: string) => string | undefined;
     claudeManagedLaunch?: ClaudeManagedLaunch;
     /** DI source of the activity-relay.cjs asset (parity with the Codex adapter). */
     activityRelayPath?: string;
@@ -95,6 +99,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     this.collectorAssetPath = deps.collectorAssetPath ?? null;
     this.autoDriveProviderPrompts = deps.autoDriveProviderPrompts ?? false;
     this.listProcesses = deps.listProcesses;
+    this.resolvePermissionMode = deps.resolvePermissionMode;
     this.claudeManagedLaunch = deps.claudeManagedLaunch;
     this.activityRelayPath = deps.activityRelayPath ?? null;
     this.claudeHooksManifestPath = deps.claudeHooksManifestPath ?? null;
@@ -380,13 +385,20 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   // -- Private helpers --
 
+  /** #86: only a launch binding carries permissionMode, so the seat's persisted selection decides for every other
+   *  caller. Unmanaged needs both to say so; a missing or unreadable selection counts as managed. */
+  private isUnmanaged(binding: NodeBinding): boolean {
+    if (binding.permissionMode !== undefined || !this.resolvePermissionMode) return false;
+    try { return this.resolvePermissionMode(binding.nodeId) === undefined; } catch { return false; }
+  }
+
   private async assessManagedProbe(binding: NodeBinding, paneCommand: string | null, paneContent: string) {
     const input = { runtime: "claude-code", paneCommand, paneContent };
     const probe = assessNativeResumeProbe(input);
     // #86: an unmanaged native install's version label reads as `claude` once its OS executable is witnessed. The
-    // witness runs only when the label would change the result; a managed launch keeps its exact proof below.
+    // witness runs only when the label would change the result; a managed seat keeps its exact proof below.
     const asClaude = assessNativeResumeProbe({ ...input, paneCommand: "claude" });
-    if (probe.status !== "resumed" && asClaude.status === "resumed" && binding.permissionMode === undefined && binding.tmuxSession
+    if (probe.status !== "resumed" && asClaude.status === "resumed" && this.isUnmanaged(binding) && binding.tmuxSession
       && await witnessedClaudeVersionLabel(paneCommand, { target: binding.tmuxSession, tmux: this.tmux, listProcesses: this.listProcesses })) {
       return asClaude;
     }
