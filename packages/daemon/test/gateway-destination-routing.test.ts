@@ -28,6 +28,8 @@ import { outboxEntriesSchema } from "../src/db/migrations/027_outbox_entries.js"
 import { queueTransitionsArchiveSchema } from "../src/db/migrations/054_queue_transitions_archive.js";
 import { ownerNotificationLevelsSchema } from "../src/db/migrations/076_owner_notification_levels.js";
 import { externalCliAttachmentSchema } from "../src/db/migrations/019_external_cli_attachment.js";
+import { rigArchiveSchema } from "../src/db/migrations/042_rig_archive.js";
+import { occupantTenuresSchema } from "../src/db/migrations/060_occupant_tenures.js";
 import { EventBus } from "../src/domain/event-bus.js";
 import { OutboxHandler } from "../src/domain/outbox-handler.js";
 import { QueueRepository } from "../src/domain/queue-repository.js";
@@ -58,7 +60,7 @@ function makeHarness(opts?: { registryReadable?: () => boolean; entities?: () =>
   migrate(db, [
     coreSchema, bindingsSessionsSchema, externalCliAttachmentSchema, eventsSchema, queueItemsSchema,
     queueTransitionsSchema, outboxEntriesSchema, queueTransitionsArchiveSchema,
-    ownerNotificationLevelsSchema,
+    ownerNotificationLevelsSchema, rigArchiveSchema, occupantTenuresSchema,
   ]);
   const bus = new EventBus(db);
   const sends: Array<{ session: string; text: string }> = [];
@@ -626,7 +628,8 @@ describe("a terminal seat never gets a typed queue wake", () => {
 
   function seedTerminalSeat(rig: string, logicalId: string, session: string) {
     h.db.prepare("INSERT OR IGNORE INTO rigs (id, name) VALUES (?, ?)").run(`rig-${rig}`, rig);
-    h.db.prepare("INSERT INTO nodes (id, rig_id, logical_id, runtime) VALUES (?, ?, ?, 'terminal')").run(`node-${logicalId}`, `rig-${rig}`, logicalId);
+    const { id: rigId } = h.db.prepare("SELECT id FROM rigs WHERE name = ?").get(rig) as { id: string };
+    h.db.prepare("INSERT INTO nodes (id, rig_id, logical_id, runtime) VALUES (?, ?, ?, 'terminal')").run(`node-${logicalId}`, rigId, logicalId);
     h.db.prepare("INSERT INTO sessions (id, node_id, session_name) VALUES (?, ?, ?)").run(`sess-${logicalId}`, `node-${logicalId}`, session);
     h.db.prepare("INSERT INTO bindings (id, node_id, attachment_type, tmux_session) VALUES (?, ?, 'tmux', ?)").run(`binding-${logicalId}`, `node-${logicalId}`, session);
   }
@@ -674,5 +677,20 @@ describe("a terminal seat never gets a typed queue wake", () => {
     expect(h.sends[0]!.session).toBe("dev-a@rig1");
     expect(h.sends[0]!.text).toContain("From: infra-shell@rig1");
     expect(h.sends[0]!.text).toContain(item.qitemId);
+  });
+
+  it("a currently bound agent with older terminal history gets its wake and retry", async () => {
+    seedTerminalSeat("rig1", "old.shell", "dev-a@rig1");
+    // Retain the old terminal session row, but its binding has moved elsewhere.
+    h.db.prepare("UPDATE bindings SET tmux_session='old-shell@rig1' WHERE node_id='node-old.shell'").run();
+    const item = await h.repo.create({ sourceSession: "dev-b@rig1", destinationSession: "dev-a@rig1",
+      summary: "current agent work", evidenceRef: EVIDENCE, body: "for the current occupant" });
+    await vi.waitFor(() => expect(h.repo.getById(item.qitemId)!.lastNudgeResult).not.toBeNull());
+    expect(h.repo.getById(item.qitemId)!.lastNudgeResult).toBe("verified");
+    expect(h.sends).toHaveLength(1);
+    await h.repo.maybeNudge(item.qitemId, "dev-a@rig1", true, "dev-b@rig1");
+    expect(h.repo.getById(item.qitemId)!.lastNudgeResult).toBe("verified");
+    expect(h.sends).toHaveLength(2);
+    expect(h.sends.every(send => send.session === "dev-a@rig1")).toBe(true);
   });
 });

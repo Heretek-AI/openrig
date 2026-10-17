@@ -131,6 +131,22 @@ describe("terminal-runtime send framing", () => {
     expect(f.executions).toEqual([{ status: 0, stdout: OUTPUT, stderr: "" }]);
   });
 
+  it("direct HTTP explicit interaction keeps text when exactText is also supplied", async () => {
+    const f = fixture("terminal", false);
+    const app = new Hono();
+    app.use("*", async (c, next) => { c.set("sessionTransport" as never, f.transport); await next(); });
+    app.route("/api/transport", transportRoutes());
+    const response = await app.request("/api/transport/send", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session: f.name, text: "explicit input", exactText: "different exact body",
+        dangerouslyInteract: true, reason: "private explicit input control" }),
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json()).ok).toBe(true);
+    expect(f.pasted).toEqual(["explicit input"]);
+    expect(f.commands.filter(argv => argv[1] === "send-keys" && argv.includes("Enter"))).toHaveLength(0);
+  });
+
   it("keeps a non-terminal envelope with unreadable process observations", async () => {
     const f = fixture("claude-code");
     expect(await run(f, [f.name, BODY])).toBe(0);
@@ -152,8 +168,7 @@ describe("terminal-runtime send framing", () => {
         const other = f.rigRepo.addNode(f.rig.id, "other", { runtime: "claude-code" });
         f.registry.updateBinding(other.id, { tmuxSession: f.name });
       }
-      // The older queue/notice predicate is unchanged; it is not sufficient
-      // proof for selecting the current input target's exact body.
+      // Historical classification alone does not establish the current binding.
       expect(isTerminalSeat(db, f.name)).toBe(true);
       expect(isBoundTerminalSeat(db, f.name)).toBe(false);
       const original = wrapSendBody("operator@framing", f.name, BODY);
@@ -180,4 +195,32 @@ describe("terminal-runtime send framing", () => {
     expect(result.envelopeOmitted).toBeUndefined();
     expect(f.pasted).toEqual([original]);
   });
+
+  it("an OpenRig notice follows the current agent binding rather than old terminal history", async () => {
+    const f = fixture("claude-code", false);
+    const old = f.rigRepo.addNode(f.rig.id, "old.shell", { runtime: "terminal" });
+    db.prepare("INSERT INTO sessions(id,node_id,session_name) VALUES ('zz-old-terminal',?,?)").run(old.id, f.name);
+    f.registry.updateBinding(old.id, { tmuxSession: "old-shell@framing" });
+    expect(isTerminalSeat(db, f.name)).toBe(true);
+    expect(isBoundTerminalSeat(db, f.name)).toBe(false);
+    const result = await f.transport.send(f.name, "current agent notice", { openrigNotice: true });
+    expect(result.ok).toBe(true);
+    expect(result.reason).not.toBe("terminal_seat");
+    expect(f.pasted).toEqual(["current agent notice"]);
+  });
+
+  it.each(["moved binding", "unbound canonical", "ambiguous binding"])(
+    "an OpenRig notice takes the ordinary path for %s", async shape => {
+      const f = fixture("terminal", false);
+      if (shape === "moved binding") f.registry.updateBinding(f.node.id, { tmuxSession: "other@framing" });
+      if (shape === "unbound canonical") db.prepare("DELETE FROM bindings WHERE node_id = ?").run(f.node.id);
+      if (shape === "ambiguous binding") {
+        const other = f.rigRepo.addNode(f.rig.id, "other", { runtime: "claude-code" });
+        f.registry.updateBinding(other.id, { tmuxSession: f.name });
+      }
+      const result = await f.transport.send(f.name, "ordinary notice", { openrigNotice: true });
+      expect(result.ok).toBe(true);
+      expect(result.reason).not.toBe("terminal_seat");
+      expect(f.pasted).toEqual(["ordinary notice"]);
+    });
 });

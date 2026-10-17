@@ -26,7 +26,7 @@ import type { EventBus } from "./event-bus.js";
 import type { AgentActivity } from "./types.js";
 import type { GuardTarget, SeatDeliveryGuard } from "./seat-delivery-guard.js";
 import { wrapPaneEnvelope, appendDeliveredSegment, type EnvelopeScope } from "../lib/pane-envelope.js";
-import { isBoundTerminalSeat, isTerminalSeat } from "./terminal-seat.js";
+import { isBoundTerminalSeat } from "./terminal-seat.js";
 import { getSelfHostId } from "./hosts/fanout-contract.js";
 import { SeatIdentityStore } from "./seat-identity-store.js";
 import { isShellForeground } from "./shell-classifier.js";
@@ -1901,7 +1901,7 @@ export class SessionTransport {
   async send(sessionName: string, text: string, opts?: SendOpts): Promise<SendResult> {
     // OpenRig's own notices (the watchdog, the model monitor) are never typed into a terminal seat,
     // whose shell or TUI would run them. Queue wakes stop earlier, in performWakeSend.
-    if (opts?.openrigNotice && isTerminalSeat(this.db, sessionName)) {
+    if (opts?.openrigNotice && isBoundTerminalSeat(this.db, sessionName)) {
       return { ok: false, sessionName, sent: false, reason: "terminal_seat",
         error: `'${sessionName}' is a terminal seat (runtime: terminal); OpenRig does not type its own notices into it. Nothing was sent.` };
     }
@@ -1909,7 +1909,7 @@ export class SessionTransport {
     // whose outbox body, hash and delivery-ID identity all key on the text actually typed.
     // Without the envelope there's no Sent: line, so stampISO is dropped too: the delivered-latency
     // segment must never edit a line of the exact text.
-    if (opts?.exactText !== undefined) {
+    if (opts?.exactText !== undefined && !opts.dangerouslyInteract) {
       const { exactText, ...rest } = opts;
       if (!isBoundTerminalSeat(this.db, sessionName)) return this.send(sessionName, text, rest);
       return { ...(await this.send(sessionName, exactText, { ...rest, stampISO: undefined })), envelopeOmitted: true };
