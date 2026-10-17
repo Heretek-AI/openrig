@@ -616,6 +616,9 @@ describe("GET /api/queue/:qitemId carries the owner notification level", () => {
     const row = await (await app.request(`/api/queue/${item.qitemId}`)).json() as Record<string, unknown>;
     expect(row).toMatchObject({ destinationClass: "pane-bound", ownerNotificationLevel: "ALERT", deliveryOutcome: "posted" });
     h.db.close();
+  });
+});
+
 // A terminal seat runs a shell or a TUI, not an agent: a typed wake would run as a command line.
 describe("a terminal seat never gets a typed queue wake", () => {
   let h: ReturnType<typeof makeHarness>;
