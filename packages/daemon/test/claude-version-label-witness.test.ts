@@ -7,7 +7,7 @@ import { ClaudeCodeAdapter, type ClaudeAdapterFsOps } from "../src/adapters/clau
 import { ClaudeResumeAdapter } from "../src/adapters/claude-resume.js";
 import type { TmuxAdapter } from "../src/adapters/tmux.js";
 import type { NodeBinding } from "../src/domain/runtime-adapter.js";
-import type { NativeProcessRow } from "../src/domain/native-process-lineage.js";
+import type { NativeProcessLister, NativeProcessRow } from "../src/domain/native-process-lineage.js";
 import type { ClaudeManagedLaunch } from "../src/domain/claude-managed-launch.js";
 import { ClaimService } from "../src/domain/claim-service.js";
 import { createFullTestDb, createTestApp } from "./helpers/test-app.js";
@@ -28,10 +28,12 @@ const NATIVE_PATH = `/fixture/.local/share/claude/versions/${VERSION}`;
 const startedAt = "Fri Oct 16 01:00:00 2026";
 
 // The staging subshell exec'd Claude, so Claude leads the pane's foreground group under the pane shell.
-function rows(command = "claude --permission-mode acceptEdits --resume tok --name seat"): NativeProcessRow[] {
+// Also used as a process lister, which may be handed list options: only a string names a command.
+function rows(command?: unknown): NativeProcessRow[] {
+  if (typeof command !== "string") command = "claude --permission-mode acceptEdits --resume tok --name seat";
   return [
     { pid: 10, ppid: 1, pgid: 10, tpgid: 12, executableName: "zsh", command: "-zsh", startedAt },
-    { pid: 12, ppid: 10, pgid: 12, tpgid: 12, executableName: VERSION, executablePath: NATIVE_PATH, command, startedAt },
+    { pid: 12, ppid: 10, pgid: 12, tpgid: 12, executableName: VERSION, executablePath: NATIVE_PATH, command: command as string, startedAt },
   ];
 }
 
@@ -235,5 +237,46 @@ describe("#86 recovery readiness (ContextMonitor.pollOnce) follows the seat's pe
     ["unmanaged, a witnessed version label", { rows }, "ready"],
   ])("%s", async (_name, opts, expected) => {
     expect(await poll(opts)).toBe(expected);
+  });
+});
+
+describe("#86 an actual path-read timeout ends the witness for the rest of one wait", () => {
+  const unwitnessed = () => rows().map(r => ({ ...r, executablePath: undefined }));
+  // As listNativeProcesses does when the OS read times out: the path stays unset and the caller is told.
+  const timedOut: NativeProcessLister = (opts) => { opts?.onPathReadTimeout?.(); return unwitnessed(); };
+  const launch = (claude: ClaudeCodeAdapter) => claude.launchHarness(binding(), { name: "seat", resumeToken: "tok" });
+
+  it.each<[string, () => NativeProcessLister, number]>([
+    ["a first-sample timeout", () => vi.fn(timedOut), 1],
+    ["a second-sample timeout", () => vi.fn<NativeProcessLister>().mockImplementationOnce(() => rows()).mockImplementation(timedOut), 2],
+  ])("the launch wait stops reading after %s and ends with main's result", async (_name, makeList, reads) => {
+    const list = makeList();
+    expect(await launch(adapter(mockTmux(VERSION), list)))
+      .toMatchObject({ ok: false, error: "Claude resume failed: timed out waiting for Claude to become active" });
+    expect(list).toHaveBeenCalledTimes(reads);
+  });
+
+  it("a missing path without a timeout isn't one: every observation still tries", async () => {
+    const list = vi.fn(unwitnessed);
+    expect(await launch(adapter(mockTmux(VERSION), list))).toMatchObject({ ok: false });
+    expect(list).toHaveBeenCalledTimes(17);
+  });
+
+  it("a later, independent launch wait uses a healthy witness", async () => {
+    let read: NativeProcessLister = timedOut;
+    const claude = adapter(mockTmux(VERSION), (opts) => read(opts));
+    expect(await launch(claude)).toMatchObject({ ok: false });
+    read = () => rows();
+    expect(await launch(claude)).toMatchObject({ ok: true, resumeToken: "tok" });
+  });
+
+  it("the legacy restore wait reads once after a timeout, and its next wait uses a healthy witness", async () => {
+    let read: NativeProcessLister = timedOut;
+    const list = vi.fn<NativeProcessLister>((opts) => read(opts));
+    const resume = new ClaudeResumeAdapter(mockTmux(VERSION), { listProcesses: list, sleep: async () => {} });
+    expect(await resume.resume("dev-impl@rig", "claude_id", "tok", "/project")).toMatchObject({ ok: false, code: "attention_required" });
+    expect(list).toHaveBeenCalledTimes(1);
+    read = () => rows();
+    expect(await resume.resume("dev-impl@rig", "claude_id", "tok", "/project")).toMatchObject({ ok: true });
   });
 });
