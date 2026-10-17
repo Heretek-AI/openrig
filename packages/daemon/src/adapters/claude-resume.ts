@@ -6,7 +6,7 @@ import { shellQuote } from "./shell-quote.js";
 import { claudeResumeLaunchEnv, claudeResumeLaunchPrefix } from "./claude-resume-launch.js";
 import { claudePostureFlag, claudeClassicRendererEnvPrefix } from "./yolo-mode.js";
 import { assessNativeResumeProbe } from "../domain/native-resume-probe.js";
-import { verifyClaudePaneProcess, witnessedClaudeVersionLabel, type ClaudeLaunchedProcess, type NativeProcessLister } from "../domain/native-process-lineage.js";
+import { verifyClaudePaneProcess, witnessedClaudeVersionLabel, type ClaudeLaunchedProcess, type NativeProcessLister, type VersionLabelWitnessWait } from "../domain/native-process-lineage.js";
 import { observeClaudePermission, type AppliedLaunchObservation } from "../domain/permission-drift.js";
 import { unresolvedClaudePermissionModes } from "../domain/native-permission-selection.js";
 import type { ClaudeManagedLaunch } from "../domain/claude-managed-launch.js";
@@ -116,12 +116,12 @@ export class ClaudeResumeAdapter {
 
   /** #86: as the launch adapter's probe, an unmanaged native install's version label reads as `claude` once its OS
    *  executable is witnessed. The witness runs only when the label would change the result. */
-  private async assessProbe(target: string, paneCommand: string | null, paneContent: string, unmanaged: boolean) {
+  private async assessProbe(target: string, paneCommand: string | null, paneContent: string, unmanaged: boolean, witnessWait: VersionLabelWitnessWait) {
     const input = { runtime: "claude-code", paneCommand, paneContent };
     const probe = assessNativeResumeProbe(input);
     const asClaude = assessNativeResumeProbe({ ...input, paneCommand: "claude" });
     if (unmanaged && probe.status !== "resumed" && asClaude.status === "resumed"
-      && await witnessedClaudeVersionLabel(paneCommand, { target, tmux: this.tmux, listProcesses: this.options.listProcesses })) return asClaude;
+      && await witnessedClaudeVersionLabel(paneCommand, { target, tmux: this.tmux, listProcesses: this.options.listProcesses }, witnessWait)) return asClaude;
     return probe;
   }
 
@@ -130,11 +130,13 @@ export class ClaudeResumeAdapter {
     const maxWaitMs = this.options.maxWaitMs ?? 5_000;
     const sleepFn = this.options.sleep ?? sleep;
     const attempts = Math.max(1, Math.floor(maxWaitMs / Math.max(pollMs, 1)) + 1);
+    // #86: one record per wait; after an actual path-read timeout the rest of this wait skips the witness.
+    const witnessWait: VersionLabelWitnessWait = { pathReadTimedOut: false };
 
     for (let attempt = 0; attempt < attempts; attempt++) {
       const paneCommand = await this.tmux.getPaneCommand(tmuxSessionName);
       const paneContent = (await this.tmux.capturePaneContent(tmuxSessionName, 40)) ?? "";
-      const probe = await this.assessProbe(tmuxSessionName, paneCommand, paneContent, unmanaged);
+      const probe = await this.assessProbe(tmuxSessionName, paneCommand, paneContent, unmanaged, witnessWait);
 
       if (probe.code === "no_conversation_found") {
         return {
@@ -169,7 +171,7 @@ export class ClaudeResumeAdapter {
 
     const finalCommand = await this.tmux.getPaneCommand(tmuxSessionName);
     const finalContent = (await this.tmux.capturePaneContent(tmuxSessionName, 40)) ?? "";
-    const finalProbe = await this.assessProbe(tmuxSessionName, finalCommand, finalContent, unmanaged);
+    const finalProbe = await this.assessProbe(tmuxSessionName, finalCommand, finalContent, unmanaged, witnessWait);
 
     if (finalProbe.code === "no_conversation_found") {
       return { ok: false, code: "retry_fresh", message: "Claude resume failed: no conversation found for the requested session" };
