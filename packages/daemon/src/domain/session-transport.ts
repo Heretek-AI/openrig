@@ -26,7 +26,7 @@ import type { EventBus } from "./event-bus.js";
 import type { AgentActivity } from "./types.js";
 import type { GuardTarget, SeatDeliveryGuard } from "./seat-delivery-guard.js";
 import { wrapPaneEnvelope, appendDeliveredSegment, type EnvelopeScope } from "../lib/pane-envelope.js";
-import { isTerminalSeat } from "./terminal-seat.js";
+import { isBoundTerminalSeat, isTerminalSeat } from "./terminal-seat.js";
 import { getSelfHostId } from "./hosts/fanout-contract.js";
 import { SeatIdentityStore } from "./seat-identity-store.js";
 import { isShellForeground } from "./shell-classifier.js";
@@ -1911,7 +1911,7 @@ export class SessionTransport {
     // segment must never edit a line of the exact text.
     if (opts?.exactText !== undefined) {
       const { exactText, ...rest } = opts;
-      if (!isTerminalSeat(this.db, sessionName)) return this.send(sessionName, text, rest);
+      if (!isBoundTerminalSeat(this.db, sessionName)) return this.send(sessionName, text, rest);
       return { ...(await this.send(sessionName, exactText, { ...rest, stampISO: undefined })), envelopeOmitted: true };
     }
     const guard = this.tmuxAdapter.deliveryGuard;

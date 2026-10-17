@@ -1,4 +1,22 @@
 import type Database from "better-sqlite3";
+import { resolveGuardTarget } from "./seat-delivery-guard.js";
+
+/** Exact-text selection needs the same unique current target as input delivery,
+ * plus a binding to the actual tmux address. Historical rows and unbound
+ * canonical names alone do not establish what is receiving this input. */
+export function isBoundTerminalSeat(db: Database.Database, sessionName: string): boolean {
+  try {
+    const target = resolveGuardTarget(db, sessionName);
+    if (!target) return false;
+    const current = db.prepare(
+      `SELECT n.runtime AS runtime FROM nodes n JOIN bindings b ON b.node_id = n.id
+        WHERE n.id = ? AND (b.tmux_session = ? OR b.tmux_pane = ?)`,
+    ).get(target.nodeId, sessionName, sessionName) as { runtime: string | null } | undefined;
+    return current?.runtime === "terminal";
+  } catch {
+    return false;
+  }
+}
 
 /** A `runtime: terminal` node, by its newest session row or else its composed canonical name
  *  (`<logical id with dashes>@<rig>`). A database that can't answer reads as not terminal. */

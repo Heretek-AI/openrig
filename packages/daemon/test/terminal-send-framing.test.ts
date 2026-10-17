@@ -5,12 +5,13 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { sendCommand, type SendDeps } from "../../cli/src/commands/send.js";
+import { sendCommand, wrapSendBody, type SendDeps } from "../../cli/src/commands/send.js";
 import { senderIdentityHeaders } from "../../cli/src/client.js";
 import { TmuxAdapter } from "../src/adapters/tmux.js";
 import { RigRepository } from "../src/domain/rig-repository.js";
 import { SessionRegistry } from "../src/domain/session-registry.js";
 import { SessionTransport } from "../src/domain/session-transport.js";
+import { isBoundTerminalSeat, isTerminalSeat } from "../src/domain/terminal-seat.js";
 import { transportRoutes } from "../src/routes/transport.js";
 import { createFullTestDb } from "./helpers/test-app.js";
 
@@ -32,7 +33,7 @@ describe("terminal-runtime send framing", () => {
   });
   afterEach(() => { db.close(); rmSync(scratch, { recursive: true, force: true }); vi.unstubAllEnvs(); });
 
-  function fixture(runtime: "terminal" | "claude-code" = "terminal") {
+  function fixture(runtime: "terminal" | "claude-code" = "terminal", execute = true) {
     const rigRepo = new RigRepository(db);
     const registry = new SessionRegistry(db);
     const rig = rigRepo.createRig("framing");
@@ -52,7 +53,7 @@ describe("terminal-runtime send framing", () => {
     }, async argv => {
       commands.push(argv);
       if (argv[1] === "paste-buffer") { pasted.push(buffer); input += buffer; }
-      if (argv[1] === "send-keys" && argv.includes("Enter") && runtime === "terminal") {
+      if (argv[1] === "send-keys" && argv.includes("Enter") && runtime === "terminal" && execute) {
         const result = spawnSync("/bin/sh", ["-s"], { input: input + "\n", cwd: scratch,
           env: { PATH: "/usr/bin:/bin", HOME: scratch }, encoding: "utf8", timeout: 3_000 });
         if (result.error) throw result.error;
@@ -95,7 +96,8 @@ describe("terminal-runtime send framing", () => {
         return { ok: true, exitCode: 0, stdout: "", stderr: "" };
       },
     };
-    return { name, pasted, commands, executions, requests, sshArgv, deps: deps as unknown as SendDeps };
+    return { name, pasted, commands, executions, requests, sshArgv, node, session, registry,
+      rigRepo, rig, transport, deps: deps as unknown as SendDeps };
   }
 
   async function run(f: ReturnType<typeof fixture>, args: string[]) {
@@ -136,5 +138,46 @@ describe("terminal-runtime send framing", () => {
     expect(f.pasted[0]).toContain("From: operator@framing\nTo: " + f.name);
     expect(f.pasted[0]).toContain("\n---\n" + BODY + "\n---\n↩ Reply:");
     expect(f.executions).toEqual([]);
+  });
+
+  it.each(["moved binding", "unbound canonical", "ambiguous binding"])(
+    "does not infer an exact-text target from %s", async shape => {
+      const f = fixture("terminal", false);
+      if (shape === "moved binding") f.registry.updateBinding(f.node.id, { tmuxSession: "other@framing" });
+      if (shape === "unbound canonical") {
+        db.prepare("DELETE FROM sessions WHERE id = ?").run(f.session.id);
+        db.prepare("DELETE FROM bindings WHERE node_id = ?").run(f.node.id);
+      }
+      if (shape === "ambiguous binding") {
+        const other = f.rigRepo.addNode(f.rig.id, "other", { runtime: "claude-code" });
+        f.registry.updateBinding(other.id, { tmuxSession: f.name });
+      }
+      // The older queue/notice predicate is unchanged; it is not sufficient
+      // proof for selecting the current input target's exact body.
+      expect(isTerminalSeat(db, f.name)).toBe(true);
+      expect(isBoundTerminalSeat(db, f.name)).toBe(false);
+      const original = wrapSendBody("operator@framing", f.name, BODY);
+      const result = await f.transport.send(f.name, original, { exactText: BODY });
+      expect(result.ok).toBe(true); // No new refusal or raw-mode inference.
+      expect(result.envelopeOmitted).toBeUndefined();
+      expect(f.pasted).toEqual([original]);
+    });
+
+  it("a real current binding establishes terminal input even without a session-history row", async () => {
+    const f = fixture("terminal", false);
+    db.prepare("DELETE FROM sessions WHERE id = ?").run(f.session.id);
+    expect(isBoundTerminalSeat(db, f.name)).toBe(true);
+    const result = await f.transport.send(f.name, "rendered envelope", { exactText: BODY });
+    expect(result).toMatchObject({ ok: true, envelopeOmitted: true });
+    expect(f.pasted).toEqual([BODY]);
+  });
+
+  it("keeps an old client's unmarked envelope-looking text verbatim", async () => {
+    const f = fixture("terminal", false);
+    const original = wrapSendBody("operator@framing", f.name, BODY);
+    const result = await f.transport.send(f.name, original);
+    expect(result.ok).toBe(true);
+    expect(result.envelopeOmitted).toBeUndefined();
+    expect(f.pasted).toEqual([original]);
   });
 });
