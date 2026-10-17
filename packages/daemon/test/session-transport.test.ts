@@ -2590,6 +2590,8 @@ describe("SessionTransport", () => {
       expect(result.waitedMs).toBe(100);
       expect(sendTextSpy).not.toHaveBeenCalled();
     } finally { clock.restore(); }
+  });
+
   // A terminal seat's shell runs every typed line, so it gets the exact text, never the envelope.
   function seedTerminalSeat() {
     const rig = rigRepo.createRig("term-rig");
