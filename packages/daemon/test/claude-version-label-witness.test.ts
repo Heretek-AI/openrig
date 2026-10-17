@@ -11,6 +11,17 @@ import type { NativeProcessRow } from "../src/domain/native-process-lineage.js";
 import type { ClaudeManagedLaunch } from "../src/domain/claude-managed-launch.js";
 import { ClaimService } from "../src/domain/claim-service.js";
 import { createFullTestDb, createTestApp } from "./helpers/test-app.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { createDb } from "../src/db/connection.js";
+import { migrate } from "../src/db/migrate.js";
+import { ALL_MIGRATIONS } from "../src/db/all-migrations.js";
+import { RigRepository } from "../src/domain/rig-repository.js";
+import { SessionRegistry } from "../src/domain/session-registry.js";
+import { NativePermissionStore } from "../src/domain/native-permission-store.js";
+import { ContextUsageStore } from "../src/domain/context-usage-store.js";
+import { ContextMonitor } from "../src/domain/context-monitor.js";
 
 const VERSION = "2.1.300";
 const NATIVE_PATH = `/fixture/.local/share/claude/versions/${VERSION}`;
@@ -55,8 +66,11 @@ function binding(extra: Partial<NodeBinding> = {}): NodeBinding {
     cmuxWorkspace: null, cmuxSurface: null, updatedAt: "", cwd: "/project", ...extra };
 }
 
-const adapter = (tmux: TmuxAdapter, listProcesses: () => NativeProcessRow[] | Promise<NativeProcessRow[]>) =>
-  new ClaudeCodeAdapter({ tmux, fsOps, listProcesses, sleep: async () => {} });
+// The seat's persisted managed permission mode; by default the seat has no managed selection.
+type PermissionModeReader = (nodeId: string) => string | undefined;
+const adapter = (tmux: TmuxAdapter, listProcesses: () => NativeProcessRow[] | Promise<NativeProcessRow[]>,
+  resolvePermissionMode: PermissionModeReader | null = () => undefined) =>
+  new ClaudeCodeAdapter({ tmux, fsOps, listProcesses, sleep: async () => {}, ...(resolvePermissionMode ? { resolvePermissionMode } : {}) });
 
 describe("#86 unmanaged launch wait", () => {
   it.each([
@@ -106,6 +120,17 @@ describe("#86 results that don't change", () => {
   it("a managed seat keeps its exact proof; the witness isn't consulted", async () => {
     const list = vi.fn(rows);
     expect(await adapter(mockTmux(VERSION), list).checkReady(binding({ permissionMode: "auto" })))
+      .toMatchObject({ ready: false, code: "awaiting_runtime" });
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, PermissionModeReader | null]>([
+    ["a persisted managed selection, through a binding without permissionMode", () => "auto"],
+    ["an unreadable selection", () => { throw new Error("Invalid persisted native permission selection; launch refused."); }],
+    ["no selection reader", null],
+  ])("the witness isn't consulted with %s", async (_name, resolvePermissionMode) => {
+    const list = vi.fn(rows);
+    expect(await adapter(mockTmux(VERSION), list, resolvePermissionMode).checkReady(binding()))
       .toMatchObject({ ready: false, code: "awaiting_runtime" });
     expect(list).not.toHaveBeenCalled();
   });
@@ -174,5 +199,41 @@ describe("#86 reconcile-session drift", () => {
   it("an unwitnessed version label keeps the drift line", async () => {
     const result = await reconcile(() => rows().map(r => r.pid === 12 ? { ...r, executablePath: `/opt/other/${VERSION}` } : r));
     expect(result.projectionDrift.join(" ")).toContain(`runtime unverified: pane command "${VERSION}" does not confirm runtime "claude-code"`);
+  });
+});
+
+describe("#86 recovery readiness (ContextMonitor.pollOnce) follows the seat's persisted selection", () => {
+  async function poll(opts: { selection?: string; label?: string; rows: () => NativeProcessRow[] }): Promise<string> {
+    const db = createDb();
+    migrate(db, ALL_MIGRATIONS);
+    const rigRepo = new RigRepository(db);
+    const sessions = new SessionRegistry(db);
+    const node = rigRepo.addNode(rigRepo.createRig("recovery-rig").id, "dev.impl", { runtime: "claude-code", cwd: "/project" });
+    const session = sessions.registerSession(node.id, "dev-impl@recovery-rig");
+    db.prepare("UPDATE sessions SET status = 'running', startup_status = 'attention_required' WHERE id = ?").run(session.id);
+    const permissions = new NativePermissionStore(db);
+    if (opts.selection) permissions.write(node.id, { runtime: "claude-code", mode: opts.selection }, "test", "managed seat");
+    const stateDir = mkdtempSync(join(tmpdir(), "label-witness-"));
+    const claude = new ClaudeCodeAdapter({ tmux: mockTmux(opts.label ?? VERSION), fsOps, listProcesses: opts.rows, sleep: async () => {},
+      resolvePermissionMode: (nodeId) => permissions.resolve(nodeId, "claude-code").permissionMode });
+    const monitor = new ContextMonitor(db, new ContextUsageStore(db, { stateDir, codexHomeDir: stateDir }),
+      { ensureContextCollector: () => {}, checkReady: (b) => claude.checkReady(b) });
+    try {
+      await monitor.pollOnce();
+      return (db.prepare("SELECT startup_status FROM sessions WHERE id = ?").get(session.id) as { startup_status: string }).startup_status;
+    } finally {
+      monitor.stop();
+      db.close();
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+  }
+
+  it.each<[string, Parameters<typeof poll>[0], string]>([
+    ["managed auto, a version label, the wrong conversation", { selection: "auto", rows: () => rows("claude --permission-mode auto --resume other --name seat") }, "attention_required"],
+    ["managed auto, a version label, no OS path", { selection: "auto", rows: () => rows().map(r => ({ ...r, executablePath: undefined })) }, "attention_required"],
+    ["managed auto, the ordinary claude label, as on main", { selection: "auto", label: "claude", rows }, "ready"],
+    ["unmanaged, a witnessed version label", { rows }, "ready"],
+  ])("%s", async (_name, opts, expected) => {
+    expect(await poll(opts)).toBe(expected);
   });
 });
