@@ -33,7 +33,7 @@
     "clsx": "^2.1.1",
     "dagre": "^0.8.5",
     "lucide-react": "^1.6.0",
-    "postcss": "^8.5.8",
+    "postcss": "^8.5.30",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.5.0",
@@ -49,7 +49,7 @@
     "@vitejs/plugin-react": "^4.4.0",
     "jsdom": "^26.0.0",
     "typescript": "^5.7.0",
-    "vite": "^6.0.0",
-    "vitest": "^3.0.0"
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
   }
 }
