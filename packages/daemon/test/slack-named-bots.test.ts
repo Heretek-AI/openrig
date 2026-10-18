@@ -404,6 +404,34 @@ describe("named-bot delivery at the gateway boundary", () => {
     expect(reads).toBeLessThanOrEqual(1);
   });
 
+  it("counts an admission another writer saved after the router read the file: a live copy isn't charged or cut off", async () => {
+    const fsops = memFs();
+    const h = harness({ fsops, bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 1 }] });
+    expect(await h.deliver(botPost({ ts: "20.1" }))).toEqual({ status: "accepted", reason: "bot" }); // reads the file; uses the hour
+    new DeadLetterStore<SlackEvent>("/d.jsonl", fsops).append({ ...botPost({ ts: "20.2" }), botAdmitted: true }, 1);
+    expect(await h.deliver(botPost({ ts: "20.2" }))).toEqual({ status: "accepted", reason: "bot" });
+    expect(h.rows.filter((r) => r.tags?.includes("slack-bot-cutoff"))).toEqual([]);
+    expect(await h.deliver(botPost({ ts: "20.3" }))).toEqual({ status: "refused", reason: "bot-cut-off" }); // a new post still obeys it
+    await h.router.retryDeadLetters();
+    expect(h.rows.filter((r) => !r.tags?.includes("slack-bot-cutoff")).map((r) => r.body.match(/ts (\d+\.\d+)/)?.[1])).toEqual(["20.1", "20.2"]);
+    expect(h.dead.readAll()).toEqual([]);
+  });
+
+  it("an old router's handler that finishes after a rewire saves an admission the new router honors", async () => {
+    const fsops = memFs();
+    const bots = [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 1 }];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const old = harness({ fsops, bots, createFails: () => true, lookup: async () => { await gate; return { ok: true, appId: BOT_APP }; } });
+    const pending = old.deliver(botPost({ ts: "21.1" })); // waits on bots.info across the rewire
+    const fresh = harness({ fsops, bots });
+    expect(await fresh.deliver(botPost({ ts: "21.2" }))).toEqual({ status: "accepted", reason: "bot" });
+    release();
+    expect((await pending).status).toBe("dead-lettered"); // the old router admitted it; its create failed
+    expect(await fresh.deliver(botPost({ ts: "21.1" }))).toEqual({ status: "accepted", reason: "bot" });
+    expect(fresh.rows.filter((r) => r.tags?.includes("slack-bot-cutoff"))).toEqual([]);
+  });
+
   it("ignores an admission marker in Slack's own payload", async () => {
     const h = harness({ bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 1 }] });
     expect((await h.deliver(botPost({ ts: "11.1" }))).status).toBe("accepted");
