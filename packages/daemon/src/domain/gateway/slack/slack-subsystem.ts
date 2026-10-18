@@ -445,7 +445,7 @@ export function buildSlackGatewayWire(opts: SlackWireOpts): GatewayWire {
           );
           // #96: once an update shares this root, a new decision from its owner starts a fresh
           // root instead, so the decision never lands in a thread a reader took as FYI-only.
-          if (own && !threadReplyTo(p) && opts.queueRepo.isReplyToThread(own.threadTs)) return undefined;
+          if (own && !threadReplyTo(p) && opts.queueRepo.isReplyToThread(own.threadTs, { channel: own.channel, isDefault: own.channel === cfg.channel })) return undefined;
           // #192: with a channel map, a root in another channel than this attempt's (the seat was
           // remapped since this item's root was posted) cannot carry this post, so a fresh root
           // opens in this attempt's channel. Without a map the root is reused as it always was,

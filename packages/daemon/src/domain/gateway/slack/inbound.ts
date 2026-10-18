@@ -387,6 +387,9 @@ export class InboundRouter {
     const picked = parseQuestionAction(action?.block_id, action?.action_id);
     if (!picked) return { status: "ignored", reason: "not-a-question-button" };
     const rootTs = clickedRootTs(payload);
+    // A root is its channel's, so a click finds its decision by channel too. Slack can name it in the payload or
+    // only in the container (forwarding.ts reads both the same way).
+    const channel = payload.channel?.id ?? payload.container?.channel_id;
     // A thread reply about this click: once per live click; the dead-letter retry (live false) only confirms success.
     // A posted reply is recorded in the durable seen store, so a redelivery or a restart doesn't repeat it; one being
     // posted is held in memory, so a redelivery arriving meanwhile is skipped. A reply that failed to post isn't
@@ -397,7 +400,7 @@ export class InboundRouter {
       if (key && (this.replyingTo.has(key) || this.deps.seen.load().has(key))) return;
       if (key) this.replyingTo.add(key);
       try {
-        const posted = await this.deps.acknowledgeAnswer?.({ channel: payload.channel?.id, threadTs: rootTs, text });
+        const posted = await this.deps.acknowledgeAnswer?.({ channel, threadTs: rootTs, text });
         if (key && posted !== false) this.deps.seen.mark(key, "click-reply");
       } catch (e) {
         this.deps.log?.(`click reply failed thread=${rootTs}: ${(e as Error).message}`);
@@ -411,7 +414,7 @@ export class InboundRouter {
       if (live) await acknowledge(CLICK_REPLIES.unregistered);
       return { status: "refused", reason: "unregistered" };
     }
-    const route = rootTs ? this.deps.resolveRoute?.({ type: "message", thread_ts: rootTs, channel: payload.channel?.id }) : undefined;
+    const route = rootTs ? this.deps.resolveRoute?.({ type: "message", thread_ts: rootTs, channel }) : undefined;
     const qitemId = route?.correlationQitemId;
     if (!rootTs || !route || !qitemId) {
       if (live) await acknowledge(CLICK_REPLIES.unmapped);

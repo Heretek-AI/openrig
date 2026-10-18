@@ -3386,14 +3386,23 @@ export class QueueRepository {
 
   /** #96 — whether some update recorded this Slack root as the thread it posts into. Such a
    *  root is shared: its owner's next decision must not reuse it (see slack-subsystem). */
-  isReplyToThread(threadTs: string): boolean {
+  isReplyToThread(threadTs: string, where?: { channel: string; isDefault: boolean }): boolean {
     if (!this.hasQueueTransitionsTable) return false;
     // Same trust rule as replyToChoiceFor: a pre-provenance schema reads every row as null.
     const provenance = this.hasTransitionProvenanceColumn ? " AND identity_provenance IS NULL" : "";
+    const note = formatReplyToChoice({ kind: "thread", threadTs });
+    // A root is its channel's: with `where`, only a choice made in that channel counts. One recorded
+    // without a channel was made in the default channel (choices name any other), so it counts there only.
+    if (where) {
+      const notes = [`${note} channel=${where.channel}`, ...(where.isDefault ? [note] : [])];
+      return this.db.prepare(
+        `SELECT 1 FROM queue_transitions
+          WHERE transition_note IN (${notes.map(() => "?").join(", ")}) AND actor_session = ?${provenance} LIMIT 1`,
+      ).get(...notes, REPLY_TO_CHOICE_ACTOR) !== undefined;
+    }
     // #192: with a channel map the note carries a ` channel=<id>` suffix. Match the exact note, or
     // the exact note followed by that suffix; a prefix compare, not LIKE (the note itself contains
     // `_`), and the trailing space keeps thread 1.1 from matching 1.10.
-    const note = formatReplyToChoice({ kind: "thread", threadTs });
     const withChannel = `${note} channel=`;
     return this.db.prepare(
       `SELECT 1 FROM queue_transitions
