@@ -67,7 +67,8 @@ function harness(opts: { bots?: NamedBot[]; apps?: Record<string, string>; looku
     now: () => nowMs,
     log: (m: string) => logs.push(m),
   } as never);
-  const deliver = (event: SlackEvent, appId: string | undefined = OUR_APP) =>
+  // `null`: an envelope with no api_app_id (an explicit undefined would take the default).
+  const deliver = (event: SlackEvent, appId: string | null = OUR_APP) =>
     handleEnvelope({ envelope_id: "env-1", type: "events_api", payload: { event, ...(appId ? { api_app_id: appId } : {}) } }, () => {}, router, (m) => logs.push(m));
   return { router, rows, logs, lookups, senders, resolved, dead, deliver, advance: (ms: number) => { nowMs += ms; } };
 }
@@ -126,7 +127,7 @@ describe("named-bot delivery at the gateway boundary", () => {
 
   it("drops a bot post when the envelope doesn't name the receiving app", async () => {
     const h = harness();
-    expect(await h.deliver(botPost(), undefined)).toEqual({ status: "ignored", reason: "own-app" });
+    expect(await h.deliver(botPost(), null)).toEqual({ status: "ignored", reason: "own-app" });
     expect(h.rows).toEqual([]);
   });
 
