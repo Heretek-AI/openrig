@@ -194,16 +194,31 @@ describe("#192 channel map through the real Slack wire", () => {
   });
 
   // rev1.r2: the channel= suffix must not hide a shared root from isReplyToThread.
-  it("isReplyToThread for a root in a channel counts that channel's choice, and an unqualified one only for the default channel", async () => {
-    const item = await ask("pr@my-rig", { humanIntent: "update" });
+  it("isReplyToThread for a root counts a choice naming its channel, and an unnamed one made for that root's conversation", async () => {
+    const decision = await ask("pr@my-rig");
+    const item = await ask("pr@my-rig", { humanIntent: "update", replyTo: decision.qitemId });
     const note = (text: string) => repo.update({ qitemId: item.qitemId, actorSession: "daemon@kernel", transitionNote: text });
     note("slack-reply-to-choice kind=thread thread_ts=4.4 channel=C0EXAMPLE2");
-    note("slack-reply-to-choice kind=thread thread_ts=5.5"); // recorded before choices named their channel: the default one
-    expect(repo.isReplyToThread("4.4", { channel: "C0EXAMPLE2", isDefault: false })).toBe(true);
-    expect(repo.isReplyToThread("4.4", { channel: "C0EXAMPLE3", isDefault: false })).toBe(false); // the same ts in another channel
-    expect(repo.isReplyToThread("5.5", { channel: "C0DEFAULT", isDefault: true })).toBe(true);
-    expect(repo.isReplyToThread("5.5", { channel: "C0EXAMPLE3", isDefault: false })).toBe(false);
-    expect(repo.isReplyToThread("4.4")).toBe(true); // without a channel, any channel, as before
+    note("slack-reply-to-choice kind=thread thread_ts=5.5"); // written before choices named their channel
+    const root = (channel: string, conversationId = decision.qitemId) => ({ channel, conversationId });
+    expect(repo.isReplyToThread("4.4", root("C0EXAMPLE2"))).toBe(true);
+    expect(repo.isReplyToThread("4.4", root("C0EXAMPLE3"))).toBe(false); // the same ts in another channel
+    expect(repo.isReplyToThread("5.5", root("C0ANYWHERE"))).toBe(true); // its row replies to this root's conversation
+    expect(repo.isReplyToThread("5.5", root("C0ANYWHERE", "qitem-another-conversation"))).toBe(false);
+    expect(repo.isReplyToThread("4.4")).toBe(true); // without a root, any channel, as before
+  });
+
+  it("an update's unnamed choice still marks its root shared after the default channel changes: the owner's next decision opens a fresh root", async () => {
+    rewire(undefined, false, "C0OLD");
+    const decision = await ask("pr@my-rig");
+    await deliver(decision.qitemId); // root 1.1 in C0OLD
+    repo.update({ qitemId: decision.qitemId, actorSession: human, state: "done", closureReason: "no-follow-on", transitionNote: "human approved" });
+    const update = await ask("pr@my-rig", { humanIntent: "update", summary: "Merged.", body: "Merged.", replyTo: decision.qitemId });
+    expect(await deliver(update.qitemId)).toMatchObject({ channel: "C0OLD", thread_ts: "1.1" }); // shared; its choice names no channel
+    rewire([{ match: "pr@my-rig", channel: "C0OLD" }], false, "C0NEW"); // a new default; the seat stays in C0OLD
+    const again = await deliverEpisode(decision.qitemId, "re-park");
+    expect(again.channel).toBe("C0OLD");
+    expect(again.thread_ts).toBeUndefined(); // a fresh root, never the shared FYI thread
   });
 
   it("isReplyToThread finds a thread choice recorded with or without the channel suffix, and only that exact thread", async () => {
