@@ -13,7 +13,7 @@ import { threadPartMapSchema } from "../src/db/migrations/097_thread_part_map.js
 import { threadSeatMapChannelKeySchema } from "../src/db/migrations/115_thread_seat_map_channel_key.js";
 import { ThreadSeatMap, formatPostedStamp, parsePostedStamp } from "../src/domain/gateway/slack/thread-seat-map.js";
 import { makeThreadRouteResolver } from "../src/domain/gateway/slack/thread-routing.js";
-import { InboundRouter, type SlackEvent } from "../src/domain/gateway/slack/inbound.js";
+import { InboundRouter, type SlackEvent, type SlackBlockActions } from "../src/domain/gateway/slack/inbound.js";
 import { SeenStore, DeadLetterStore, type StateFsOps } from "../src/domain/gateway/slack/state-store.js";
 import { subsystemSlackDeliver } from "../src/domain/gateway/slack/slack-delivery.js";
 import { buildInProcessWire } from "../src/domain/gateway/gateway-subsystem.js";
@@ -328,5 +328,44 @@ describe("#192 channel map — one resolved channel per post (post, reconcile sc
     expect(channelOf("chat.postMessage")).toEqual(["C0EXAMPLE2"]);
     expect(channelOf("files.completeUploadExternal")).toEqual(["C0EXAMPLE2"]);
     expect(roots).toEqual(["C0EXAMPLE2:1800.1"]);
+  });
+});
+
+describe("a click finds its decision by channel and ts", () => {
+  it("a click naming its channel only in its container reaches that channel's decision, live and on a retained retry", async () => {
+    let tick = 0;
+    const map = new ThreadSeatMap(mapDb(), () => new Date(Date.UTC(2026, 7, 27, 0, 0, tick++)));
+    map.open({ threadTs: "800.1", channel: "C0A", human: "human-founder@kernel", seat: "a@r", conversationId: "qitem-a" });
+    map.open({ threadTs: "800.1", channel: "C0B", human: "human-founder@kernel", seat: "b@r", conversationId: "qitem-b" }); // opened later
+    const answered: string[] = [];
+    let failContinuation = true;
+    const fs = memFs();
+    const actionDeadLetter = new DeadLetterStore<SlackBlockActions>("/a.jsonl", fs, clock);
+    const router = new InboundRouter({
+      queue: { createQitem: async (input: { qitemId: string }) => { if (failContinuation) throw new Error("database is locked"); return input.qitemId; } },
+      seen: new SeenStore("/s.jsonl", fs, clock),
+      deadLetter: new DeadLetterStore<SlackEvent>("/d.jsonl", fs, clock),
+      actionDeadLetter,
+      destination: "operator-agent@kernel",
+      resolveSender: () => ({ admitted: true, source: "human-founder@kernel" }),
+      resolveRoute: makeThreadRouteResolver({ map, unroutedDestination: "operator-agent@kernel" }),
+      recordHumanAnswer: (input: { qitemId: string }) => {
+        answered.push(input.qitemId);
+        return { status: "recorded", complete: true, answers: { ship: "yes" }, questions: [{ id: "ship", question: "Ship?", options: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }] }] };
+      },
+      resolveHumanReply: async () => "resolved",
+    } as never);
+    // Slack can name the channel only in the container; the click is on C0A's root.
+    const click: SlackBlockActions = {
+      type: "block_actions", user: { id: "UFOUNDER" },
+      container: { message_ts: "800.1", channel_id: "C0A" },
+      actions: [{ block_id: "or-q:ship", action_id: "or-opt:yes", action_ts: "801.5" }],
+    };
+    expect(await router.routeAction(click)).toMatchObject({ status: "handler-failed" }); // its hand-back fails: kept for retry
+    expect(actionDeadLetter.readAll()).toHaveLength(1);
+    failContinuation = false;
+    await router.retryDeadLetters();
+    expect(answered).toEqual(["qitem-a", "qitem-a"]);
+    expect(actionDeadLetter.readAll()).toEqual([]);
   });
 });

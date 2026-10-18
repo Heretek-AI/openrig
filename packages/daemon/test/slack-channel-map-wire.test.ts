@@ -194,6 +194,18 @@ describe("#192 channel map through the real Slack wire", () => {
   });
 
   // rev1.r2: the channel= suffix must not hide a shared root from isReplyToThread.
+  it("isReplyToThread for a root in a channel counts that channel's choice, and an unqualified one only for the default channel", async () => {
+    const item = await ask("pr@my-rig", { humanIntent: "update" });
+    const note = (text: string) => repo.update({ qitemId: item.qitemId, actorSession: "daemon@kernel", transitionNote: text });
+    note("slack-reply-to-choice kind=thread thread_ts=4.4 channel=C0EXAMPLE2");
+    note("slack-reply-to-choice kind=thread thread_ts=5.5"); // recorded before choices named their channel: the default one
+    expect(repo.isReplyToThread("4.4", { channel: "C0EXAMPLE2", isDefault: false })).toBe(true);
+    expect(repo.isReplyToThread("4.4", { channel: "C0EXAMPLE3", isDefault: false })).toBe(false); // the same ts in another channel
+    expect(repo.isReplyToThread("5.5", { channel: "C0DEFAULT", isDefault: true })).toBe(true);
+    expect(repo.isReplyToThread("5.5", { channel: "C0EXAMPLE3", isDefault: false })).toBe(false);
+    expect(repo.isReplyToThread("4.4")).toBe(true); // without a channel, any channel, as before
+  });
+
   it("isReplyToThread finds a thread choice recorded with or without the channel suffix, and only that exact thread", async () => {
     const item = await ask("pr@my-rig", { humanIntent: "update" });
     const note = (text: string, actorSession = "daemon@kernel") => repo.update({ qitemId: item.qitemId, actorSession, transitionNote: text });
