@@ -42,9 +42,10 @@ export interface SlackEvent {
   /** The envelope's `api_app_id`: the app RECEIVING the event, ours. Set by handleEnvelope only, and
    *  retained across dead-letter retry; a named bot whose app matches it is OpenRig itself. */
   receivingAppId?: string;
-  /** Internal: a bot post the limiter already admitted whose row is still owed. Set only on the copy
-   *  kept for retry (never on a retained entry in place), so it lands later without being charged again,
-   *  across the hour and a rewire. handleEnvelope clears it from Slack's payload. */
+  /** Internal: a bot post the limiter already admitted whose row is still owed. Set only on a copy saved
+   *  for retry (never on a retained entry in place), and it covers every retained copy of the same post, so
+   *  the post lands later without being charged again, across the hour and a rewire. handleEnvelope clears
+   *  it from Slack's payload. */
   botAdmitted?: boolean;
 }
 
@@ -553,9 +554,10 @@ export class InboundRouter {
 
   /** The one admission for a bot post, live and on dead-letter retry alike: the current inbox channel,
    *  the bot's app, and its limit, which counts each post once by its `channel:ts` identity. A post the
-   *  limiter already admitted and still owed (`botAdmitted` on its retained copy) skips the limit.
-   *  `admitted` on a failed result says the limit admitted it, so its retained copy is marked. */
-  private async attemptBot(ev: SlackEvent): Promise<{ status: InboundDisposition; reason?: string; admitted?: boolean }> {
+   *  limiter already admitted and still owed (`botAdmitted` on any retained copy of it) skips the limit.
+   *  `admitted` on a failed result says the limit admitted it, so its retained copy is marked. `owed` is the
+   *  retry pass's set of admitted identities; a live post reads the retained file. */
+  private async attemptBot(ev: SlackEvent, owed?: ReadonlySet<string>): Promise<{ status: InboundDisposition; reason?: string; admitted?: boolean }> {
     const inbox = this.deps.botInbox;
     if (!inbox || !ev.bot_id) return { status: "ignored", reason: "bot_id" };
     if (ev.channel !== inbox.channel) {
@@ -602,7 +604,7 @@ export class InboundRouter {
         this.deps.log?.(`bot post ignored channel=${ev.channel} app=${appId} bot=${ev.bot_id}: not named in botInbox.bots`);
         return { status: "ignored", reason: "unnamed-bot" };
       }
-      if (!ev.botAdmitted) {
+      if (!ev.botAdmitted && !(owed ?? this.owedBotAdmissions()).has(eventId)) {
         const verdict = this.botLimiter.check(bot, eventId);
         if (!verdict.admit) {
           this.deps.log?.(`bot post dropped channel=${ev.channel} app=${appId}: cut off until ${new Date(verdict.until).toISOString()}`);
@@ -649,6 +651,11 @@ export class InboundRouter {
     }
   }
 
+  /** The identities of retained bot posts already admitted and still owed: a marked copy admits them all. */
+  private owedBotAdmissions(entries: readonly DeadLetterEntry<SlackEvent>[] = this.deps.deadLetter.readAll()): Set<string> {
+    return new Set(entries.filter((e) => e.ev.bot_id && e.ev.botAdmitted).map((e) => this.inboundEventId(e.ev)));
+  }
+
   /** One row when a bot is cut off, so the seat knows its posts stop arriving: at most one per bot per
    *  hour, so a short cooldown can't fill the seat's queue with notices. Best effort. */
   private async noticeCutoff(bot: NamedBot, until: number): Promise<void> {
@@ -672,12 +679,13 @@ export class InboundRouter {
         summary: `${bot.name} (Slack bot) cut off until ${at}: more than ${max} posts in an hour`,
         body: [
           `${bot.name} (app ${bot.appId}) posted more than ${max} messages in the bot inbox within an hour, its limit.`,
-          `OpenRig drops its posts until ${at} (at least ${minutes} minutes, and until the hour has room); none of them reach you meanwhile.`,
+          `OpenRig drops its new posts until ${at} (at least ${minutes} minutes, and until the hour has room); none of its new posts reach you meanwhile; a post already admitted still arrives.`,
           "A later cutoff can extend this time without another notice within the hour; the daemon log records each one.",
           "If it's caught in a loop, with you or with another bot, tell the person: removing it from botInbox.bots in",
           "slack-connector.json, then a daemon restart (`rig daemon stop`, then `rig daemon start`), turns it off.",
           "maxPerHour and cooldownMinutes there change its limits, applied the same way. (`rig slack disable --reason \"<why>\"`",
-          "then `rig slack enable` applies it too, but alerts still waiting to be posted when it's re-enabled aren't posted.)",
+          "then `rig slack enable` applies it too, but alerts waiting when it's re-enabled are treated as history and not posted;",
+          "earlier posts that failed or didn't finish still post while their rows are open.)",
         ].join("\n"),
       });
       // Only a notice that exists uses up the hour, so a failed one doesn't silence the next cutoff.
@@ -714,6 +722,7 @@ export class InboundRouter {
     const stillFailing: DeadLetterEntry<SlackEvent>[] = [];
     let landed = 0;
     const seen = this.deps.seen.load();
+    const owedBots = this.owedBotAdmissions(entries); // a marked copy anywhere in the snapshot admits its post's other copies
     for (const e of entries) {
       if (e.ev.type === "reaction_added") {
         // #899 — a reaction has no message ts of its own; it retries through its own path.
@@ -725,10 +734,14 @@ export class InboundRouter {
       }
       if (e.ev.bot_id) {
         // A named bot's post whose lookup or create failed: the same admission as live, counted once.
-        // An admitted post kept again is kept as a marked copy; the retained entry is never changed in place.
-        const r = await this.attemptBot(e.ev);
+        const r = await this.attemptBot(e.ev, owedBots);
         if (r.status === "accepted") landed++;
-        else if (r.status === "handler-failed") stillFailing.push({ ev: r.admitted && !e.ev.botAdmitted ? { ...e.ev, botAdmitted: true } : e.ev, at: e.at, attempts: e.attempts + 1 });
+        else if (r.status === "handler-failed" && r.admitted && !e.ev.botAdmitted) {
+          // Admitted just now: the marked copy is saved at once, so a stop before this pass ends can't lose
+          // the admission. The unmarked original goes with the batch; the retained entry is never changed in place.
+          this.deps.deadLetter.append({ ...e.ev, botAdmitted: true }, e.attempts + 1);
+          owedBots.add(this.inboundEventId(e.ev));
+        } else if (r.status === "handler-failed") stillFailing.push({ ev: e.ev, at: e.at, attempts: e.attempts + 1 });
         else if (r.reason === "inflight") stillFailing.push(e);
         continue;
       }
