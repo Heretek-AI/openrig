@@ -33,7 +33,7 @@ function memFs(): StateFsOps {
 
 interface Row { qitemId: string; source: string; destination: string; tags?: string[]; summary: string; body: string; inReplyTo?: string }
 
-function harness(opts: { bots?: NamedBot[]; apps?: Record<string, string>; lookup?: BotLookup; inbox?: boolean; channel?: string; fsops?: StateFsOps; createFails?: () => boolean } = {}) {
+function harness(opts: { bots?: NamedBot[]; apps?: Record<string, string>; lookup?: BotLookup; inbox?: boolean; channel?: string; fsops?: StateFsOps; createFails?: (row: Row) => boolean } = {}) {
   const fsops = opts.fsops ?? memFs();
   const clock = () => new Date("2026-10-18T06:00:00Z");
   let nowMs = Date.parse("2026-10-18T06:00:00Z");
@@ -54,7 +54,7 @@ function harness(opts: { bots?: NamedBot[]; apps?: Record<string, string>; looku
   } as never;
   const dead = new DeadLetterStore<SlackEvent>("/d.jsonl", fsops, clock);
   const router = new InboundRouter({
-    queue: { createQitem: async (input: Row) => { if (opts.createFails?.()) throw new Error("db busy"); rows.push(input); return input.qitemId; } },
+    queue: { createQitem: async (input: Row) => { if (opts.createFails?.(input)) throw new Error("db busy"); rows.push(input); return input.qitemId; } },
     seen: new SeenStore("/s.jsonl", fsops, clock),
     deadLetter: dead,
     destination: "operator-agent@kernel",
@@ -201,7 +201,9 @@ describe("named-bot delivery at the gateway boundary", () => {
     // The 30-minute cooldown ends inside the hour, so the cutoff lasts until the hour has room.
     expect(notices[0]!.summary).toBe("Example Bot (Slack bot) cut off until 2026-10-18T07:00:00.000Z: more than 2 posts in an hour");
     expect(notices[0]!.body).toContain("removing it from botInbox.bots");
-    expect(notices[0]!.body).toContain("`rig slack disable` and `rig slack enable`");
+    expect(notices[0]!.body).toContain("`rig daemon stop`, then `rig daemon start`");
+    expect(notices[0]!.body).toContain("`rig slack disable --reason");
+    expect(notices[0]!.body).toContain("A later cutoff can extend this time");
     expect(h.rows.filter((r) => !r.tags?.includes("slack-bot-cutoff"))).toHaveLength(2);
     h.advance(30 * 60_000);
     expect(await h.deliver(botPost({ ts: "1.5" }))).toEqual({ status: "refused", reason: "bot-cut-off" });
@@ -280,6 +282,55 @@ describe("named-bot delivery at the gateway boundary", () => {
     expect((await h.deliver(botPost({ ts: "8.5" }))).reason).toBe("bot-cut-off"); // a second cut-off, 10 minutes after the first
     expect(notices()).toHaveLength(1);
     expect(h.logs.some((l) => l.includes("notice") && l.includes("skipped"))).toBe(true);
+  });
+
+  it("keeps an admitted post owed past its hour and through a cutoff, and lands it on retry", async () => {
+    let failCreate = true;
+    const h = harness({ bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 1, cooldownMinutes: 60 }], createFails: () => failCreate });
+    expect((await h.deliver(botPost({ ts: "9.1" }))).status).toBe("dead-lettered"); // admitted at minute 0; its row not created
+    h.advance(60_000);
+    expect(await h.deliver(botPost({ ts: "9.2" }))).toEqual({ status: "refused", reason: "bot-cut-off" }); // cut off until minute 61
+    failCreate = false;
+    h.advance(59 * 60_000); // minute 60: 9.1's admission has left the hour, and the cutoff still runs
+    await h.router.retryDeadLetters();
+    expect(h.rows.filter((r) => !r.tags?.includes("slack-bot-cutoff")).map((r) => r.body.match(/ts (\d+\.\d+)/)?.[1])).toEqual(["9.1"]);
+    expect(h.dead.readAll()).toEqual([]);
+  });
+
+  it("keeps an admitted post owed across a rewire: the new router lands it even with its hour already used", async () => {
+    const fsops = memFs();
+    const before = harness({ fsops, bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 1 }], createFails: () => true });
+    expect((await before.deliver(botPost({ ts: "10.1" }))).status).toBe("dead-lettered");
+    const after = harness({ fsops, bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 1 }] });
+    expect(await after.deliver(botPost({ ts: "10.2" }))).toEqual({ status: "accepted", reason: "bot" }); // the new router's one post this hour
+    await after.router.retryDeadLetters();
+    expect(after.rows.filter((r) => !r.tags?.includes("slack-bot-cutoff")).map((r) => r.body.match(/ts (\d+\.\d+)/)?.[1])).toEqual(["10.2", "10.1"]);
+    expect(after.dead.readAll()).toEqual([]);
+  });
+
+  it("ignores an admission marker in Slack's own payload", async () => {
+    const h = harness({ bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 1 }] });
+    expect((await h.deliver(botPost({ ts: "11.1" }))).status).toBe("accepted");
+    expect(await h.deliver({ ...botPost({ ts: "11.2" }), botAdmitted: true } as SlackEvent)).toEqual({ status: "refused", reason: "bot-cut-off" });
+  });
+
+  it("a cut-off notice that couldn't be created doesn't use up the hour's notice", async () => {
+    let failNotice = true;
+    const h = harness({
+      bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 2, cooldownMinutes: 5 }],
+      createFails: (row) => failNotice && Boolean(row.tags?.includes("slack-bot-cutoff")),
+    });
+    const notices = () => h.rows.filter((r) => r.tags?.includes("slack-bot-cutoff"));
+    await h.deliver(botPost({ ts: "13.1" }));
+    h.advance(50 * 60_000);
+    await h.deliver(botPost({ ts: "13.2" }));
+    expect((await h.deliver(botPost({ ts: "13.3" }))).reason).toBe("bot-cut-off"); // its notice fails to create
+    expect(notices()).toEqual([]);
+    failNotice = false;
+    h.advance(10 * 60_000);
+    expect((await h.deliver(botPost({ ts: "13.4" }))).status).toBe("accepted");
+    expect((await h.deliver(botPost({ ts: "13.5" }))).reason).toBe("bot-cut-off");
+    expect(notices()).toHaveLength(1);
   });
 
   it("drops a retained post from a channel that is no longer the bot inbox", async () => {
