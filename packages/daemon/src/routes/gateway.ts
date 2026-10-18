@@ -36,7 +36,8 @@ interface SubsystemHandle {
 export function gatewayRoutes(opts: {
   home?: string;
   readiness?: (entityId: string, gatewayState: string) => Promise<HumanDeliveryReadiness | null>;
-  /** The daemon's bearer token; a relay from a shared app's hub must carry it (null: loopback-only). */
+  /** The daemon's auth bearer (OPENRIG_AUTH_BEARER_TOKEN, the one `rig host pair` issues); a relay from a
+   *  shared app's hub must carry it. Null: no bearer configured, so the route trusts the bind (loopback or tailnet). */
   relayBearerToken?: string | null;
 } = {}): Hono {
   const app = new Hono();

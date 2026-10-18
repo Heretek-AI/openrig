@@ -166,9 +166,17 @@ rig slack channel-map remove pr@my-rig
   is left to the retry of retained posts.
 - **Replies and new messages.** A reply in an item's thread reaches that item's seat, in any
   channel. To answer it in the same thread, the seat sends `rig queue create --human-intent update
-  --summary "<subject>" --reply-to <the inbound reply's row>`. A message the human starts (or a reply in a thread OpenRig does not know) goes to
-  the connector's inbound destination, whichever channel it is in. Missed-message recovery
-  (below) covers the default channel only.
+  --summary "<subject>" --reply-to <the inbound reply's row>`.
+  - **A new message a person starts in a rig's channel** goes to that rig's representative, the
+    seat the rest of its rig reports to (its one `delegates_to` root). To send it to another seat,
+    name it: `rig slack channel-map set my-rig C0EXAMPLE1 --inbound lead@my-rig`.
+  - **Every other new message,** in the default channel or a seat's channel, goes to the
+    connector's inbound destination, as does a reply in a thread OpenRig doesn't know, or a rig's
+    channel whose representative can't be found.
+  - **Answers come back to where the person asked.** A person's new message is the root of its
+    answer: when the seat it reached replies with `--reply-to` that message's row, the answer and
+    later updates land in the person's thread, in the channel they used.
+  - Missed-message recovery (below) covers the default channel only.
 
 Invite the app to every mapped channel (`/invite @OpenRig`). `rig slack verify` checks
 membership in the default channel and every mapped channel, and reports NOT ready until the
@@ -180,6 +188,41 @@ The map is stored as `channelMap` in `slack-connector.json`, as a list of `{ "ma
 entries. Saving refuses any other field. A field written by a newer OpenRig is ignored when the
 connector reads the file, and `rig slack status` names it. Private channels and direct messages
 are not supported targets.
+
+## One app across machines (optional)
+
+Slack delivers each event of an app to one of its connections, so one app can serve several
+OpenRig machines only if one machine, the hub, holds the connection and relays each other machine's
+channels to it. Each machine still decides who its messages reach, keeps its own threads and
+decisions, and posts its own replies.
+
+- **On the hub:** the bot token and the app-level token, as usual, plus `forwardChannels` in
+  `slack-connector.json`, one entry per channel another machine owns:
+
+  ```json
+  "forwardChannels": [
+    { "channel": "C0EXAMPLE3", "host": "vps04" },
+    { "channel": "C0EXAMPLE4", "host": "vps04" }
+  ]
+  ```
+
+  `host` is that machine's id in the hub's host registry (`rig host list`). It needs an http
+  entry, which `rig host pair` writes with that machine's token; the hub sends it with each relay,
+  and the machine checks it when it has `OPENRIG_AUTH_BEARER_TOKEN` set.
+- **On every other machine:** the same app's bot token only, with no app-level token, so it opens
+  no connection of its own. Set its default `channel` to its own channel and, for a rig's channel,
+  a channel map entry. Its connector is enabled as usual.
+- **What happens to a message:** the hub relays the event, a reaction or a button click untouched
+  to the machine that owns the channel. That machine handles it exactly as if it had received it:
+  who may send, where it goes, its thread and its decisions. If the relay fails (the machine is
+  down or its registry entry is wrong), the hub keeps it and retries every five minutes;
+  `rig slack status` counts it in the dead-letter backlog.
+- **Who answered:** every post ends `from <seat> on <machine>`, using the machine's host id (set
+  it with `host.name`).
+- **The hub's own channels** are handled on the hub, as before. A channel can be relayed to one
+  machine only, and never the hub's own default channel.
+- **Not covered yet:** `rig slack verify` on the hub doesn't check the app's membership in relayed
+  channels, and missed-message recovery covers the hub's default channel only.
 
 ## Reconnect recovery and status
 
