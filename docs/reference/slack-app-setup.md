@@ -226,8 +226,9 @@ name each bot, and name the seat that reads that channel. Add a `botInbox` block
   receives one row saying so (at most one an hour per bot) and how the person turns the bot off
   (remove it from `bots`, then apply the change as below). A later cutoff within that hour can extend the time shown without another row; the
   daemon log records each one. Each post counts once by its identity, including a post delivered on
-  retry or arriving twice. A post already admitted whose row couldn't be created yet is kept and
-  delivered later without counting again, even after its hour or a restart. The counts are kept in
+  retry or arriving twice. A post already admitted whose row couldn't be created yet is kept, marked
+  as admitted once that creation fails, and delivered later without counting again, even after its
+  hour or a daemon restart. The counts are kept in
   memory, so a daemon restart clears them.
 - **The channel.** Invite the app to it (`/invite @OpenRig`). `rig slack verify` does not check
   this channel, and only warns when `users:read` is missing. A person's message there is handled like a person's message in any channel the
@@ -239,7 +240,8 @@ name each bot, and name the seat that reads that channel. Add a `botInbox` block
 reaches a running connector when it next rewires, which a daemon restart does (`rig daemon stop`,
 then `rig daemon start`). `rig slack disable --reason "<why>"` then `rig slack enable` rewires too,
 but alerts still waiting to be posted when it's re-enabled are treated as already seen and aren't
-posted; only an earlier post that failed or didn't finish still posts, if its row is open.
+posted. Only an earlier post that failed or didn't finish still posts: an alert whose row is still
+open, a decision-resolved notice, or a digest.
 
 ## Reconnect recovery and status
 

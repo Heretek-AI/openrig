@@ -191,6 +191,9 @@ export class InboundRouter {
   private readonly botApps = new Map<string, string>(); // bot_id → its app, from bots.info
   private readonly botLookups = new Map<string, ReturnType<BotLookup>>(); // one bots.info call in flight per bot
   private readonly botNoticeAt = new Map<string, number>(); // the last cut-off notice per bot, at most one an hour
+  // Retained bot posts already admitted and still owed, by identity: read from the retained file once per router,
+  // then kept in step with this router's own marked appends, so a live post doesn't re-read the file.
+  private owedBots: Set<string> | undefined;
   private readonly botLimiter: BotLimiter;
   constructor(private readonly deps: InboundDeps) {
     this.botLimiter = new BotLimiter(deps.now);
@@ -547,7 +550,9 @@ export class InboundRouter {
   async routeBot(ev: SlackEvent, attempts = 0): Promise<{ status: InboundDisposition; reason?: string }> {
     const r = await this.attemptBot(ev);
     if (r.status !== "handler-failed") return r;
-    this.deps.deadLetter.append(r.admitted && !ev.botAdmitted ? { ...ev, botAdmitted: true } : ev, attempts + 1);
+    const mark = r.admitted && !ev.botAdmitted;
+    this.deps.deadLetter.append(mark ? { ...ev, botAdmitted: true } : ev, attempts + 1);
+    if (mark) this.owedBots?.add(this.inboundEventId(ev));
     this.deps.log?.(`dead-lettered bot post ts=${ev.ts} (attempt ${attempts + 1})`);
     return { status: "dead-lettered", reason: r.reason };
   }
@@ -556,7 +561,8 @@ export class InboundRouter {
    *  the bot's app, and its limit, which counts each post once by its `channel:ts` identity. A post the
    *  limiter already admitted and still owed (`botAdmitted` on any retained copy of it) skips the limit.
    *  `admitted` on a failed result says the limit admitted it, so its retained copy is marked. `owed` is the
-   *  retry pass's set of admitted identities; a live post reads the retained file. */
+   *  retry pass's set of admitted identities; a live post uses the router's, read from the retained file once. When
+   *  that file can't be read, a live post is kept for retry rather than charged or refused. */
   private async attemptBot(ev: SlackEvent, owed?: ReadonlySet<string>): Promise<{ status: InboundDisposition; reason?: string; admitted?: boolean }> {
     const inbox = this.deps.botInbox;
     if (!inbox || !ev.bot_id) return { status: "ignored", reason: "bot_id" };
@@ -604,7 +610,12 @@ export class InboundRouter {
         this.deps.log?.(`bot post ignored channel=${ev.channel} app=${appId} bot=${ev.bot_id}: not named in botInbox.bots`);
         return { status: "ignored", reason: "unnamed-bot" };
       }
-      if (!ev.botAdmitted && !(owed ?? this.owedBotAdmissions()).has(eventId)) {
+      const known = ev.botAdmitted ? undefined : owed ?? this.loadOwedBots();
+      if (!ev.botAdmitted && !known) {
+        this.deps.log?.(`bot post kept for retry ts=${ev.ts}: the retained file can't be read, so whether it's owed is unknown`);
+        return { status: "handler-failed", reason: "retained-unreadable" };
+      }
+      if (!ev.botAdmitted && !known!.has(eventId)) {
         const verdict = this.botLimiter.check(bot, eventId);
         if (!verdict.admit) {
           this.deps.log?.(`bot post dropped channel=${ev.channel} app=${appId}: cut off until ${new Date(verdict.until).toISOString()}`);
@@ -644,6 +655,7 @@ export class InboundRouter {
         return { status: "handler-failed", reason: "create_failed", admitted: true };
       }
       this.deps.seen.mark(eventId, "landed");
+      this.owedBots?.delete(eventId);
       this.deps.log?.(`bot post from ${bot.name} -> ${inbox.destination} (ts=${ev.ts})`);
       return { status: "accepted", reason: "bot" };
     } finally {
@@ -652,8 +664,17 @@ export class InboundRouter {
   }
 
   /** The identities of retained bot posts already admitted and still owed: a marked copy admits them all. */
-  private owedBotAdmissions(entries: readonly DeadLetterEntry<SlackEvent>[] = this.deps.deadLetter.readAll()): Set<string> {
+  private owedBotAdmissions(entries: readonly DeadLetterEntry<SlackEvent>[]): Set<string> {
     return new Set(entries.filter((e) => e.ev.bot_id && e.ev.botAdmitted).map((e) => this.inboundEventId(e.ev)));
+  }
+
+  /** The router's owed set, read from the retained file the first time it's needed; undefined while unreadable. */
+  private loadOwedBots(): Set<string> | undefined {
+    if (this.owedBots) return this.owedBots;
+    const read = this.deps.deadLetter.readResult();
+    if (!read.ok) return undefined;
+    this.owedBots = this.owedBotAdmissions(read.entries);
+    return this.owedBots;
   }
 
   /** One row when a bot is cut off, so the seat knows its posts stop arriving: at most one per bot per
@@ -684,8 +705,8 @@ export class InboundRouter {
           "If it's caught in a loop, with you or with another bot, tell the person: removing it from botInbox.bots in",
           "slack-connector.json, then a daemon restart (`rig daemon stop`, then `rig daemon start`), turns it off.",
           "maxPerHour and cooldownMinutes there change its limits, applied the same way. (`rig slack disable --reason \"<why>\"`",
-          "then `rig slack enable` applies it too, but alerts waiting when it's re-enabled are treated as history and not posted;",
-          "earlier posts that failed or didn't finish still post while their rows are open.)",
+          "then `rig slack enable` applies it too, but alerts waiting when it's re-enabled are treated as history and aren't posted.",
+          "Only an earlier post that failed or didn't finish still posts: an alert whose row is still open, a decision-resolved notice, or a digest.)",
         ].join("\n"),
       });
       // Only a notice that exists uses up the hour, so a failed one doesn't silence the next cutoff.
@@ -741,6 +762,7 @@ export class InboundRouter {
           // the admission. The unmarked original goes with the batch; the retained entry is never changed in place.
           this.deps.deadLetter.append({ ...e.ev, botAdmitted: true }, e.attempts + 1);
           owedBots.add(this.inboundEventId(e.ev));
+          this.owedBots?.add(this.inboundEventId(e.ev));
         } else if (r.status === "handler-failed") stillFailing.push({ ev: e.ev, at: e.at, attempts: e.attempts + 1 });
         else if (r.reason === "inflight") stillFailing.push(e);
         continue;
@@ -751,7 +773,9 @@ export class InboundRouter {
       else if (r.reason === "create_failed" || r.reason === "resolve_failed") stillFailing.push({ ev: e.ev, at: e.at, attempts: e.attempts + 1 });
       else if (r.reason === "inflight") stillFailing.push(e); // owner has not proved durable landing yet
     }
-    this.deps.deadLetter.replaceBatch(entries, stillFailing); // atomic; newer appends stay owed
+    if (!this.deps.deadLetter.replaceBatch(entries, stillFailing)) { // atomic; newer appends stay owed
+      this.deps.log?.("dead-letter file couldn't be read again: left as it was for the next retry pass");
+    }
     const actions = await this.retryActionDeadLetters();
     return { retried: entries.length + actions.retried, landed: landed + actions.landed };
   }
