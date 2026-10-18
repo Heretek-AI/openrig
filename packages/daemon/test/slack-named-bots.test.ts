@@ -204,6 +204,8 @@ describe("named-bot delivery at the gateway boundary", () => {
     expect(notices[0]!.body).toContain("`rig daemon stop`, then `rig daemon start`");
     expect(notices[0]!.body).toContain("`rig slack disable --reason");
     expect(notices[0]!.body).toContain("A later cutoff can extend this time");
+    expect(notices[0]!.body).toContain("none of its new posts reach you meanwhile; a post already admitted still arrives");
+    expect(notices[0]!.body).toContain("earlier posts that failed or didn't finish still post while their rows are open");
     expect(h.rows.filter((r) => !r.tags?.includes("slack-bot-cutoff"))).toHaveLength(2);
     h.advance(30 * 60_000);
     expect(await h.deliver(botPost({ ts: "1.5" }))).toEqual({ status: "refused", reason: "bot-cut-off" });
@@ -306,6 +308,47 @@ describe("named-bot delivery at the gateway boundary", () => {
     await after.router.retryDeadLetters();
     expect(after.rows.filter((r) => !r.tags?.includes("slack-bot-cutoff")).map((r) => r.body.match(/ts (\d+\.\d+)/)?.[1])).toEqual(["10.2", "10.1"]);
     expect(after.dead.readAll()).toEqual([]);
+  });
+
+  it("keeps an admission granted during a retry even if the pass stops before it finishes", async () => {
+    const fsops = memFs();
+    const bots = [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 1 }, { appId: "A0OTHER", name: "Other Bot" }];
+    let lookups: "down" | "example-only" | "up" = "down";
+    const lookup: BotLookup = async (botId) => {
+      if (lookups === "down") return { ok: false, retryable: true, error: "timeout" };
+      if (botId === "B0OTHER" && lookups === "example-only") return new Promise(() => {}); // the pass waits here and never finishes
+      return botId === "B0EXAMPLE" ? { ok: true, appId: BOT_APP } : { ok: true, appId: "A0OTHER" };
+    };
+    const before = harness({ fsops, bots, lookup, createFails: () => true });
+    expect((await before.deliver(botPost({ ts: "14.1" }))).status).toBe("dead-lettered"); // P: lookup failed, not yet admitted
+    expect((await before.deliver(botPost({ ts: "14.2", bot_id: "B0OTHER" }))).status).toBe("dead-lettered");
+    lookups = "example-only";
+    void before.router.retryDeadLetters(); // P is admitted and its create fails; the pass then waits on the other bot
+    await new Promise((r) => setTimeout(r, 20));
+    // The daemon stops here. A new router over the same retained files, with storage healthy and the hour already used.
+    lookups = "up";
+    const after = harness({ fsops, bots, lookup });
+    expect(await after.deliver(botPost({ ts: "14.3" }))).toEqual({ status: "accepted", reason: "bot" });
+    await after.router.retryDeadLetters();
+    const landed = after.rows.filter((r) => !r.tags?.includes("slack-bot-cutoff")).map((r) => r.body.match(/ts (\d+\.\d+)/)?.[1]);
+    expect(landed).toContain("14.1");
+    expect(after.dead.readAll()).toEqual([]);
+  });
+
+  it("an admission on one retained copy covers the post's other copies across a rewire, so it's charged once", async () => {
+    const fsops = memFs();
+    let lookupUp = false;
+    const lookup: BotLookup = async () => (lookupUp ? { ok: true, appId: BOT_APP } : { ok: false, retryable: true, error: "timeout" });
+    const before = harness({ fsops, bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 1 }], lookup, createFails: () => true });
+    expect((await before.deliver(botPost({ ts: "15.1" }))).status).toBe("dead-lettered"); // kept unadmitted: its lookup failed
+    lookupUp = true;
+    expect((await before.deliver(botPost({ ts: "15.1", type: "app_mention" }))).status).toBe("dead-lettered"); // admitted; create failed
+    expect(before.dead.readAll()).toHaveLength(2);
+    const after = harness({ fsops, bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 1 }], lookup });
+    await after.router.retryDeadLetters();
+    expect(after.rows.map((r) => r.body.match(/ts (\d+\.\d+)/)?.[1])).toEqual(["15.1"]);
+    expect(after.dead.readAll()).toEqual([]);
+    expect(await after.deliver(botPost({ ts: "15.2" }))).toEqual({ status: "accepted", reason: "bot" }); // 15.1 wasn't charged again
   });
 
   it("ignores an admission marker in Slack's own payload", async () => {
