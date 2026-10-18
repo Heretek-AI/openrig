@@ -129,7 +129,9 @@ export function mappedChannels(cfg: ChannelMapConfig): MappedChannel[] {
 /** Where a person's new (top-level) message in `channel` goes, or null for `inboundDestination`.
  *  An entry's `inbound` seat decides; otherwise the channel's one rig entry names its rig's
  *  representative. Two different `inbound` seats, or several rig entries, on one channel are
- *  ambiguous, and so is a representative that can't be found: null. */
+ *  ambiguous, and so is a representative that can't be found: null. The machine's own `channel`
+ *  keeps `inboundDestination` unless an entry there names `inbound`: a rig entry on it sends that
+ *  rig's posts there, not the machine's messages to the rig. */
 export function resolveInboundChannelDestination(
   cfg: ChannelMapConfig,
   channel: string | undefined,
@@ -139,6 +141,7 @@ export function resolveInboundChannelDestination(
   const entries = (cfg.channelMap ?? []).filter((e) => e.channel === channel);
   const explicit = [...new Set(entries.flatMap((e) => (e.inbound ? [e.inbound] : [])))];
   if (explicit.length) return explicit.length === 1 ? explicit[0]! : null;
+  if (channel === cfg.channel) return null;
   const rigs = entries.filter((e) => !isSeatMatch(e.match));
   return rigs.length === 1 ? rigRepresentative(rigs[0]!.match) : null;
 }

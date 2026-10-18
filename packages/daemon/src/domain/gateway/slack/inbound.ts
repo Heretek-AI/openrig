@@ -557,20 +557,28 @@ export class InboundRouter {
   }
 
   /** Retry relays that failed, to the host each was for. Same interruption-safe shape as the
-   *  event retry: read, attempt each, then atomically keep only the ones still failing. */
+   *  event retry: read, attempt each, then atomically keep only the ones still failing. After one
+   *  failed send to a host, that host's other relays are kept unsent for this pass (their attempts
+   *  unchanged), so a machine that is down costs one timeout a pass, not one per relay. A relay the
+   *  host keeps refusing is kept and retried every pass; nothing drops a person's message. */
   private async retryForwardDeadLetters(): Promise<{ retried: number; landed: number }> {
     const store = this.deps.forwardDeadLetter;
     const entries = store?.readAll() ?? [];
     if (!store || !this.deps.forward || entries.length === 0) return { retried: 0, landed: 0 };
     const stillFailing: DeadLetterEntry<{ host: string; envelope: SocketEnvelope }>[] = [];
+    const failedHosts = new Set<string>();
     let landed = 0;
+    let sent = 0;
     for (const e of entries) {
+      if (failedHosts.has(e.ev.host)) { stillFailing.push(e); continue; }
+      sent++;
       const r = await this.deps.forward.send(e.ev.host, e.ev.envelope);
       if (r.ok) landed++;
-      else stillFailing.push({ ev: e.ev, at: e.at, attempts: e.attempts + 1 });
+      else { failedHosts.add(e.ev.host); stillFailing.push({ ev: e.ev, at: e.at, attempts: e.attempts + 1 }); }
     }
+    if (sent < entries.length) this.deps.log?.(`relay retry: ${entries.length - sent} kept unsent for unreachable host(s) ${[...failedHosts].join(", ")}`);
     store.replaceBatch(entries, stillFailing);
-    return { retried: entries.length, landed };
+    return { retried: sent, landed };
   }
 
   /**
@@ -593,13 +601,17 @@ export class InboundRouter {
     }
   }
 
+  // This machine's own events and clicks go first, then relays for other machines, so a machine
+  // that is down never delays this one's recovery.
   private async retryDeadLetterPass(): Promise<{ retried: number; landed: number }> {
+    const own = await this.retryOwnDeadLetters();
     const forwarded = await this.retryForwardDeadLetters();
+    return { retried: own.retried + forwarded.retried, landed: own.landed + forwarded.landed };
+  }
+
+  private async retryOwnDeadLetters(): Promise<{ retried: number; landed: number }> {
     const entries = this.deps.deadLetter.readAll();
-    if (entries.length === 0) {
-      const actions = await this.retryActionDeadLetters();
-      return { retried: forwarded.retried + actions.retried, landed: forwarded.landed + actions.landed };
-    }
+    if (entries.length === 0) return this.retryActionDeadLetters();
     this.deps.log?.(`retrying ${entries.length} dead-letter(s)`);
     const stillFailing: DeadLetterEntry<SlackEvent>[] = [];
     let landed = 0;
@@ -621,7 +633,7 @@ export class InboundRouter {
     }
     this.deps.deadLetter.replaceBatch(entries, stillFailing); // atomic; newer appends stay owed
     const actions = await this.retryActionDeadLetters();
-    return { retried: forwarded.retried + entries.length + actions.retried, landed: forwarded.landed + landed + actions.landed };
+    return { retried: entries.length + actions.retried, landed: landed + actions.landed };
   }
 
   /** #193 — retry dead-lettered clicks. Same interruption-safe shape as the event retry:

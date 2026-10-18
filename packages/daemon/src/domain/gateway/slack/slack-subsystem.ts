@@ -342,9 +342,11 @@ export function buildSlackGatewayWire(opts: SlackWireOpts): GatewayWire {
       const root = threadMap.resolveByConversation(item.qitemId);
       if (root) {
         if (root.state === "closed") return { kind: "fallback", reason: "root-closed", threadTs: root.threadTs };
-        if (root.channel !== channel) return { kind: "fallback", reason: "root-other-channel", threadTs: root.threadTs };
+        // Who the root belongs to is checked before where it is, so a reply that isn't the root's
+        // says so even when it also posts in another channel.
         if (root.human !== (p.destinationSession ?? "")) return { kind: "fallback", reason: "root-other-human", threadTs: root.threadTs };
         if (root.seat !== (p.sourceSession ?? "")) return { kind: "fallback", reason: "root-other-seat", threadTs: root.threadTs };
+        if (root.channel !== channel) return { kind: "fallback", reason: "root-other-channel", threadTs: root.threadTs };
         return { kind: "thread", threadTs: root.threadTs };
       }
       if (!item.replyTo) return { kind: "fallback", reason: "root-missing", qitemId: item.qitemId };
@@ -356,12 +358,17 @@ export function buildSlackGatewayWire(opts: SlackWireOpts): GatewayWire {
   };
   // A reply to a person's own message (a root minted from it, tagged SLACK_THREAD_ROOT_TAG) posts in
   // that message's channel, wherever the replying seat's items otherwise post: the answer goes back
-  // where the person asked. Roots OpenRig posted keep #192's rule (the seat's current channel).
+  // where the person asked. Roots OpenRig posted keep #192's rule (the seat's current channel). Only a
+  // reply that will thread there takes that channel: one that fails the root's checks (another seat, another
+  // person, a closed root, a live gate) posts top-level in the replying seat's own channel, as before.
   const personRootChannel = (p: OutboundPostPayload): string | null => {
     let item = p.replyTo ? opts.queueRepo.getById(p.replyTo) : null;
     for (let depth = 0; item && depth < MAX_REPLY_TO_CHAIN; depth++) {
       const root = threadMap.resolveByConversation(item.qitemId);
-      if (root) return item.tags?.includes(SLACK_THREAD_ROOT_TAG) ? root.channel : null;
+      if (root) {
+        if (!item.tags?.includes(SLACK_THREAD_ROOT_TAG)) return null;
+        return deriveReplyToChoice(p, root.channel).kind === "thread" ? root.channel : null;
+      }
       item = item.replyTo ? opts.queueRepo.getById(item.replyTo) : null;
     }
     return null;
@@ -714,6 +721,7 @@ export function buildSlackGatewayWire(opts: SlackWireOpts): GatewayWire {
   let deadForwards: DeadLetterStore<{ host: string; envelope: SocketEnvelope }> | undefined;
   // A machine of a shared app receives its channels' events from the hub (routes/gateway.ts).
   let acceptForwarded: ((env: SocketEnvelope) => Promise<{ status: string; reason?: string }>) | undefined;
+  let relayedReceived = 0; // envelopes a hub relayed here since this wire was built
   const forwardProblems = forwardChannelProblems(cfg);
   if (cfg.forwardChannels?.length && forwardProblems.length) log(`slack forwarding OFF: ${forwardProblems.join("; ")}`);
   const forwarding = Boolean(cfg.forwardChannels?.length && forwardProblems.length === 0 && inboundReady);
@@ -742,7 +750,20 @@ export function buildSlackGatewayWire(opts: SlackWireOpts): GatewayWire {
           resolveInboundChannelDestination(cfg, channel, (rig) => resolveRigRepresentative(opts.queueRepo.db, rig)),
         log,
       }),
-      mintThread: (m) => threadMap.open(m),
+      // A person's top-level message is its answer's root, marked as theirs, and stamped on their row
+      // like a posted root, so a rebuild restores it as theirs.
+      mintThread: (m) => {
+        threadMap.open({ ...m, origin: "person" });
+        try {
+          opts.queueRepo.update({
+            qitemId: m.conversationId,
+            actorSession: "daemon@kernel",
+            transitionNote: formatPostedStamp({ ...m, messageTs: m.threadTs, origin: "person" }),
+          });
+        } catch (e) {
+          log(`thread stamp failed for ${m.conversationId}: ${(e as Error).message}`);
+        }
+      },
       resolveHumanReply: opts.resolveHumanReply,
       // #193 — a button click records its answer on the decision the clicked root belongs to;
       // a failed hand-back is retried with the event dead-letters, and each click is confirmed
@@ -784,7 +805,7 @@ export function buildSlackGatewayWire(opts: SlackWireOpts): GatewayWire {
       log,
     }));
     // An envelope the hub relayed is handled here and never relayed again.
-    acceptForwarded = (env) => handleEnvelope(env, () => {}, built, log, undefined, { relayed: true });
+    acceptForwarded = (env) => { relayedReceived++; return handleEnvelope(env, () => {}, built, log, undefined, { relayed: true }); };
     if (!inboundReady) {
       // No socket here, so no socket-driven retry: drain this machine's own retained events on the
       // same five-minute cadence the socket uses, once services start.
@@ -849,8 +870,9 @@ export function buildSlackGatewayWire(opts: SlackWireOpts): GatewayWire {
       // an unreadable file reports state "unknown" with a reason instead of a
       // false zero.
       ...deadLetterBacklogFields(dead, deadActions, deadForwards),
-      // A machine of a shared app with no socket of its own: the hub relays its channels' events.
-      ...(router && !inboundReady ? { inboundRelayed: true } : {}),
+      // A machine with no connection of its own can take events a hub relays here; whether a hub does is
+      // the hub's configuration, so this says only that it can, and how many have arrived.
+      ...(router && !inboundReady ? { relayedInbound: { accepting: true, received: relayedReceived } } : {}),
       ...(forwarding ? { forwardChannels: cfg.forwardChannels!.length } : {}),
     }),
   };

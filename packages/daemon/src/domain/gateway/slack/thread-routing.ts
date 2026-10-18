@@ -41,10 +41,12 @@ export function makeThreadRouteResolver(opts: {
   return (ev) => {
     const threadTs = (ev as { thread_ts?: string }).thread_ts;
     if (threadTs) {
-      const mapping = opts.map.resolveByThread(threadTs);
+      // A root is its channel's: a ts is unique only within a channel.
+      const mapping = opts.map.resolveByThread(threadTs, ev.channel);
       // #899 — a reaction names its message by channel and timestamp, and a timestamp is unique only
-      // within a channel, so a reaction on another channel's message is not on this ask.
-      const sameMessage = ev.type !== "reaction_added" || mapping?.channel === ev.channel;
+      // within a channel, so a reaction on another channel's message is not on this ask. A root minted
+      // from a person's own message is no ask OpenRig posted, so a reaction on it isn't one either.
+      const sameMessage = ev.type !== "reaction_added" || (mapping?.channel === ev.channel && mapping.origin !== "person");
       if (ev.type === "reaction_added" && !(mapping && sameMessage)) {
         // #899 — a reaction on a message OpenRig posted into a thread for an ask (a long ask's reply
         // part, a later notification, an ask posted into another thread) reaches that ask's own seat.
@@ -70,7 +72,7 @@ export function makeThreadRouteResolver(opts: {
         // still arriving in the OLDER root lands on the seat as a message but answers nothing:
         // only the conversation's newest root correlates to its current human gate.
         const newest = opts.map.resolveByConversation(mapping.conversationId);
-        const current = !newest || newest.threadTs === threadTs;
+        const current = !newest || (newest.threadTs === threadTs && newest.channel === mapping.channel);
         log(`inbound routed thread_ts=${threadTs} -> ${mapping.seat} (${routeClass}${current ? "" : ", superseded root: no gate correlation"})`);
         return {
           destination: mapping.seat,
