@@ -80,6 +80,15 @@ const object = (value: unknown, field: string): Record<string, unknown> => {
   return value as Record<string, unknown>;
 };
 
+/** An ISO 8601 date-time with an explicit timezone, on a real calendar date (no Feb 30): a reading's age depends on it. */
+function isIsoTimestamp(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!match || Number.isNaN(Date.parse(value))) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const calendar = new Date(Date.UTC(year, month - 1, day));
+  return calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month - 1 && calendar.getUTCDate() === day;
+}
+
 /** The shape check for a reported move. It refuses only malformed input; it never judges the move. */
 export function parseSubscriptionMove(raw: unknown): SubscriptionMoveInput {
   const body = object(raw, "the move");
@@ -100,7 +109,9 @@ export function parseSubscriptionMove(raw: unknown): SubscriptionMoveInput {
   const readings = list(body["readings"], "readings").map((entry, i) => {
     const reading = object(entry, `readings[${i}]`);
     const observedAt = text(reading["observedAt"], `readings[${i}].observedAt`)!;
-    if (Number.isNaN(Date.parse(observedAt))) throw new SubscriptionMoveInputError(`readings[${i}].observedAt must be a timestamp`);
+    if (!isIsoTimestamp(observedAt)) {
+      throw new SubscriptionMoveInputError(`readings[${i}].observedAt must be an ISO 8601 time with a timezone, e.g. 2026-10-18T09:56:00Z`);
+    }
     return { subject: text(reading["subject"], `readings[${i}].subject`)!, observedAt, summary: text(reading["summary"], `readings[${i}].summary`)! };
   });
   const peers = list(body["peers"], "peers", true).map((entry, i) => {
@@ -149,7 +160,10 @@ export class SubscriptionMoves {
   }
 
   show(id: string): SubscriptionMoveRecord | null {
-    return this.list({ limit: Number.MAX_SAFE_INTEGER }).find((record) => record.id === id) ?? null;
+    const row = this.eventBus.db.prepare(
+      "SELECT seq, payload, created_at FROM events WHERE type = ? AND json_extract(payload, '$.move.id') = ? ORDER BY seq DESC LIMIT 1",
+    ).get(SUBSCRIPTION_MOVE_EVENT, id) as { seq: number; payload: string; created_at: string } | undefined;
+    return row ? toRecord(row) : null;
   }
 }
 

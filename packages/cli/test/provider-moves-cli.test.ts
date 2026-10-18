@@ -1,5 +1,5 @@
-// OPR.0.7.0.18: `rig provider moves` (record, list, show) as an agent runs it — the built CLI, its seat identity from the
-// environment — against the daemon's real provider routes and event log over HTTP.
+// OPR.0.7.0.18: `rig provider moves` (record, list, show) as an agent runs it — the CLI from this checkout's source, its
+// seat identity from the environment — against the daemon's real provider routes and event log over HTTP.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
@@ -14,7 +14,8 @@ import { createDb } from "../../daemon/src/db/connection.js";
 import { migrate } from "../../daemon/src/db/migrate.js";
 import { ALL_MIGRATIONS } from "../../daemon/src/db/all-migrations.js";
 
-const CLI = fileURLToPath(new URL("../dist/bin-wrapper.js", import.meta.url));
+// Run from source (tsx), so the test needs no prior build.
+const CLI = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 const AGENT = "fleet@ops-rig";
 
 describe("rig provider moves", () => {
@@ -43,15 +44,11 @@ describe("rig provider moves", () => {
     const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: root, OPENRIG_HOME: path.join(root, "openrig"), OPENRIG_URL: url };
     if (seat) env.OPENRIG_SESSION_NAME = seat;
     return new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
-      execFile(process.execPath, [CLI, ...args], { env }, (error, stdout, stderr) => {
+      execFile(process.execPath, ["--import", "tsx", CLI, ...args], { env, cwd: fileURLToPath(new URL("..", import.meta.url)) }, (error, stdout, stderr) => {
         resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout, stderr });
       });
     });
   }
-
-  it("has a built CLI", () => {
-    expect(fs.existsSync(CLI), `build the CLI first (npm run build): ${CLI} is missing`).toBe(true);
-  });
 
   it("records a move from a file under the agent's seat, then lists and shows it", async () => {
     const file = path.join(root, "move.json");
