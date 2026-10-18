@@ -96,7 +96,7 @@ describe("one shared Slack app across two machines", () => {
   // A seat answers the person's row with --reply-to, and that machine's connector posts it.
   async function answer(m: Machine, seat: string, replyTo: string, summary: string): Promise<Record<string, unknown>> {
     const before = m.posts.length;
-    const u = m.repo.create({ sourceSession: seat, destinationSession: human, humanIntent: "update", replyTo, summary, body: summary, nudge: false });
+    const u = await m.repo.create({ sourceSession: seat, destinationSession: human, humanIntent: "update", replyTo, summary, body: summary, nudge: false });
     const alert = (await makeQueuePorts(m.repo, { loadHumanRegistry: () => registry }).listHumanAlerts({})).find((q) => q.qitemId === u.qitemId);
     expect(alert).toBeDefined();
     expect(m.wire!.dispatcher.dispatch("post_message", human, alert)).toMatchObject({ ok: true });
