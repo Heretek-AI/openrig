@@ -191,9 +191,11 @@ export class InboundRouter {
   private readonly botApps = new Map<string, string>(); // bot_id → its app, from bots.info
   private readonly botLookups = new Map<string, ReturnType<BotLookup>>(); // one bots.info call in flight per bot
   private readonly botNoticeAt = new Map<string, number>(); // the last cut-off notice per bot, at most one an hour
-  // Retained bot posts already admitted and still owed, by identity: read from the retained file once per router,
-  // then kept in step with this router's own marked appends, so a live post doesn't re-read the file.
+  // Retained bot posts already admitted and still owed, by identity: read from the retained file, and read again
+  // only after any store in this process writes it (owedBotsGeneration), so a live post doesn't re-read an
+  // unchanged file. Landings are removed here as they happen.
   private owedBots: Set<string> | undefined;
+  private owedBotsGeneration = -1;
   private readonly botLimiter: BotLimiter;
   constructor(private readonly deps: InboundDeps) {
     this.botLimiter = new BotLimiter(deps.now);
@@ -668,12 +670,16 @@ export class InboundRouter {
     return new Set(entries.filter((e) => e.ev.bot_id && e.ev.botAdmitted).map((e) => this.inboundEventId(e.ev)));
   }
 
-  /** The router's owed set, read from the retained file the first time it's needed; undefined while unreadable. */
+  /** The router's owed set, read from the retained file the first time it's needed and again only after the
+   *  file was written since: by this router, a retry pass, or an old router's handler still finishing after a
+   *  rewire. Undefined while unreadable. */
   private loadOwedBots(): Set<string> | undefined {
-    if (this.owedBots) return this.owedBots;
+    const generation = this.deps.deadLetter.writeGeneration();
+    if (this.owedBots && generation === this.owedBotsGeneration) return this.owedBots;
     const read = this.deps.deadLetter.readResult();
     if (!read.ok) return undefined;
     this.owedBots = this.owedBotAdmissions(read.entries);
+    this.owedBotsGeneration = generation;
     return this.owedBots;
   }
 
@@ -793,7 +799,9 @@ export class InboundRouter {
       if (r.status === "handler-failed") stillFailing.push({ ev: e.ev, at: e.at, attempts: e.attempts + 1 });
       else if (r.status === "accepted") landed++;
     }
-    store.replaceBatch(entries, stillFailing);
+    if (!store.replaceBatch(entries, stillFailing)) {
+      this.deps.log?.("click dead-letter file couldn't be read again: left as it was for the next retry pass");
+    }
     return { retried: entries.length, landed };
   }
 }

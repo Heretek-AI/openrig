@@ -110,6 +110,9 @@ export interface DeadLetterEntry<T = unknown> {
   attempts: number;
 }
 
+/** Per file system, each dead-letter file's write count in this process (see DeadLetterStore.writeGeneration). */
+const deadLetterWrites = new WeakMap<StateFsOps, Map<string, number>>();
+
 /**
  * Inbound never-drop net. Every event that fails to land is appended
  * (attempt-counted) BEFORE the error path returns.
@@ -135,6 +138,20 @@ export class DeadLetterStore<T = unknown> {
       this.file,
       JSON.stringify({ ev, at: this.now().toISOString(), attempts } satisfies DeadLetterEntry<T>) + "\n",
     );
+    this.wrote();
+  }
+
+  /** How many times this process has written the file, through any store on the same file system (a
+   *  rewire builds new stores while an old router's handlers may still finish). A reader that kept what it
+   *  read re-reads only when this has moved. */
+  writeGeneration(): number {
+    return deadLetterWrites.get(this.fsops)?.get(this.file) ?? 0;
+  }
+
+  private wrote(): void {
+    let files = deadLetterWrites.get(this.fsops);
+    if (!files) deadLetterWrites.set(this.fsops, (files = new Map()));
+    files.set(this.file, (files.get(this.file) ?? 0) + 1);
   }
 
   /** Non-destructive read of all durable entries. */
@@ -170,6 +187,7 @@ export class DeadLetterStore<T = unknown> {
     const tmp = `${this.file}.tmp`;
     this.fsops.writeFileSync(tmp, body);
     this.fsops.rename(tmp, this.file); // atomic: original intact until this instant
+    this.wrote();
   }
 
   /** Finish a retry snapshot without removing entries appended while it awaited I/O.

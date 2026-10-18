@@ -228,8 +228,8 @@ name each bot, and name the seat that reads that channel. Add a `botInbox` block
   daemon log records each one. Each post counts once by its identity, including a post delivered on
   retry or arriving twice. A post already admitted whose row couldn't be created yet is kept, marked
   as admitted once that creation fails, and delivered later without counting again, even after its
-  hour or a daemon restart. The counts are kept in
-  memory, so a daemon restart clears them.
+  hour, a rewire or a daemon restart. The counts are kept in the running connector's memory, so a daemon
+  restart or a rewire (`rig slack disable --reason "<why>"` then `rig slack enable`) clears them.
 - **The channel.** Invite the app to it (`/invite @OpenRig`). `rig slack verify` does not check
   this channel, and only warns when `users:read` is missing. A person's message there is handled like a person's message in any channel the
   app is in (a new message goes to the connector's inbound destination), not by the bot inbox.

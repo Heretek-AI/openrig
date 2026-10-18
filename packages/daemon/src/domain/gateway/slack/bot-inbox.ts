@@ -68,7 +68,7 @@ export type BotLookup = (botId: string) => Promise<{ ok: true; appId: string } |
  *  for `cooldownMinutes`, and at least until the rolling hour has room again, so the hourly maximum holds
  *  across a cutoff. A post counts once by its identity (`channel:ts`): another copy of a post already
  *  admitted this hour (a retry, or Slack's `message` and `app_mention` pair for one post) is admitted
- *  without counting again. A daemon restart clears all of it. */
+ *  without counting again. Each router builds its own limiter, so a daemon restart or a rewire clears all of it. */
 export class BotLimiter {
   private readonly admitted = new Map<string, Array<{ at: number; post: string }>>();
   private readonly cutoffUntil = new Map<string, number>();
