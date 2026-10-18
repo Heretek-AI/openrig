@@ -946,10 +946,11 @@ rig auth seats … --runtime codex         # seat -> profile registry (metadata 
 
 **Hard secret boundary:** no token value is ever printed, logged, queued, streamed, or committed; status/validate report presence/mode/login-state only; seat labels are metadata, not live-account proof. MVP is `--runtime codex`; other runtimes use the same surface with a different `--runtime`, never a parallel command.
 
-### Manage subscriptions across a fleet (the Observatory's agent)
+### Manage subscriptions across a fleet (the fleet studio's agent)
 
-When a person runs several Claude and Codex subscriptions across machines, the Observatory's own agent keeps work
-running. If that's you, you decide which subscription or home moves, and when. You decide from:
+When a person runs several Claude and Codex subscriptions across machines, the fleet studio bundle's one agent keeps
+work running, through the Fleet app. If that's you, you decide which subscription or home moves, and when. You
+decide from:
 - the usage and assignment readings, and their freshness;
 - the move record;
 - the person's standing preferences.
@@ -961,6 +962,7 @@ and there's no threshold to obey.
 - **The person's operator agent** can ask you for a move, or look at the record. It doesn't make competing moves of
   its own.
 - **There's no other fleet-manager role.** Use the commands below directly; no extra hand-off is needed.
+- **The Observatory is optional:** it can show your moves and readings, but you don't need it to rotate.
 
 **The unit is a Codex home, with every seat on it.** Moving some seats on a shared home to a different account, and
 moving Claude seats, aren't supported moves yet: say so instead of improvising.
