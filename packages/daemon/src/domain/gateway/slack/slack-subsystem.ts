@@ -356,12 +356,13 @@ export function buildSlackGatewayWire(opts: SlackWireOpts): GatewayWire {
       ? { kind: "fallback", reason: "chain-too-long", qitemId: item.qitemId }
       : { kind: "fallback", reason: "root-missing", qitemId: p.replyTo ?? "" };
   };
-  // The conversation whose root a reply-to walk from `startId` meets first: where deriveReplyToChoice
-  // stops, so a reader of its unnamed choices credits that root and never an older ancestor's.
-  const firstRootOwner = (startId: string | null | undefined): string | null => {
+  // The conversation whose root an unnamed choice of `threadTs` took: the first item on the reply-to walk from
+  // `startId` that owns a root with that ts. That's where deriveReplyToChoice stopped when it chose, so an older
+  // ancestor's root isn't credited, and neither is a root an item on the way opened after the choice.
+  const choiceRootOwner = (startId: string | null | undefined, threadTs: string): string | null => {
     let item = startId ? opts.queueRepo.getById(startId) : null;
     for (let depth = 0; item && depth < MAX_REPLY_TO_CHAIN; depth++) {
-      if (threadMap.resolveByConversation(item.qitemId)) return item.qitemId;
+      if (threadMap.resolveByConversation(item.qitemId, threadTs)) return item.qitemId;
       item = item.replyTo ? opts.queueRepo.getById(item.replyTo) : null;
     }
     return null;
@@ -455,12 +456,12 @@ export function buildSlackGatewayWire(opts: SlackWireOpts): GatewayWire {
           );
           // #96: once an update shares this root, a new decision from its owner starts a fresh
           // root instead, so the decision never lands in a thread a reader took as FYI-only.
-          // A choice naming this root's channel shares it. One naming no channel shares it when that
-          // update's own reply-to walk met this conversation's root first, as its writer did.
+          // A choice naming this root's channel shares it. One naming no channel shares it when the
+          // root with that ts its update's reply-to walk meets first is this conversation's.
           if (own && !threadReplyTo(p) && (
             opts.queueRepo.isReplyToThread(own.threadTs, { channel: own.channel })
             || opts.queueRepo.unnamedReplyToChoiceRows(own.threadTs)
-              .some((id) => firstRootOwner(opts.queueRepo.getById(id)?.replyTo) === own.conversationId)
+              .some((id) => choiceRootOwner(opts.queueRepo.getById(id)?.replyTo, own.threadTs) === own.conversationId)
           )) return undefined;
           // #192: with a channel map, a root in another channel than this attempt's (the seat was
           // remapped since this item's root was posted) cannot carry this post, so a fresh root

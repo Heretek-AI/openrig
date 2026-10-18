@@ -116,11 +116,13 @@ export class ThreadSeatMap {
   }
 
   /** #96: the root a conversation opened, open OR closed (the caller decides whether a
-   *  closed root may be reused), newest first; null = the conversation never posted a root. */
-  resolveByConversation(conversationId: string): ThreadMapping | null {
-    const row = this.db
-      .prepare(`SELECT * FROM thread_seat_map WHERE conversation_id = ? ORDER BY ${NEWEST_ROOT_FIRST} LIMIT 1`)
-      .get(conversationId) as Record<string, unknown> | undefined;
+   *  closed root may be reused), newest first; null = the conversation never posted a root.
+   *  With `threadTs`, only a root with that ts (in any channel). */
+  resolveByConversation(conversationId: string, threadTs?: string): ThreadMapping | null {
+    const row = (threadTs === undefined
+      ? this.db.prepare(`SELECT * FROM thread_seat_map WHERE conversation_id = ? ORDER BY ${NEWEST_ROOT_FIRST} LIMIT 1`).get(conversationId)
+      : this.db.prepare(`SELECT * FROM thread_seat_map WHERE conversation_id = ? AND thread_ts = ? ORDER BY ${NEWEST_ROOT_FIRST} LIMIT 1`)
+        .get(conversationId, threadTs)) as Record<string, unknown> | undefined;
     return row ? project(row) : null;
   }
 
