@@ -159,8 +159,9 @@ export class SubscriptionMoves {
 
   /** Newest first. A seat filter matches a moved seat or a peer. */
   list(filter: { home?: string; seat?: string; limit?: number } = {}): SubscriptionMoveRecord[] {
+    // Iterate, newest first, and stop as soon as the filtered limit is met: no reading the whole history for one row.
     const rows = this.eventBus.db.prepare(SUBSCRIPTION_MOVE_LIST_SQL)
-      .all(SUBSCRIPTION_MOVE_EVENT) as Array<{ seq: number; payload: string; created_at: string }>;
+      .iterate(SUBSCRIPTION_MOVE_EVENT) as Iterable<{ seq: number; payload: string; created_at: string }>;
     const records: SubscriptionMoveRecord[] = [];
     for (const row of rows) {
       const record = toRecord(row);

@@ -2,7 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { createFullTestDb, createTestApp } from "./helpers/test-app.js";
-import { SUBSCRIPTION_MOVE_LIST_SQL, SUBSCRIPTION_MOVE_SHOW_SQL } from "../src/domain/provider/subscription-moves.js";
+import { SUBSCRIPTION_MOVE_LIST_SQL, SUBSCRIPTION_MOVE_SHOW_SQL, SubscriptionMoves } from "../src/domain/provider/subscription-moves.js";
+import type { EventBus } from "../src/domain/event-bus.js";
 import { createDb } from "../src/db/connection.js";
 import { migrate } from "../src/db/migrate.js";
 import { ALL_MIGRATIONS } from "../src/db/all-migrations.js";
@@ -137,6 +138,15 @@ describe("subscription move record", () => {
       expect(plan).not.toMatch(/SCAN events\b(?! USING)/);
     }
     full.close();
+  });
+
+  it("stops reading the event log once the limit is met", () => {
+    let pulled = 0;
+    const row = (n: number) => ({ seq: n, created_at: "2026-10-18 10:00:00", payload: JSON.stringify({ move: { ...move(), id: `move-${n}`, recordedBy: AGENT, recordedVia: "transport:v1" } }) });
+    const rows = (function* () { for (let n = 1000; n > 0; n--) { pulled++; yield row(n); } });
+    const bus = { db: { prepare: () => ({ iterate: rows, all: () => [...rows()] }) } } as unknown as EventBus;
+    expect(new SubscriptionMoves(bus).list({ limit: 2 }).map((m) => m.id)).toEqual(["move-1000", "move-999"]);
+    expect(pulled).toBe(2);
   });
 
   it("asks for an actor when no seat identity is present, and writes nothing", async () => {
