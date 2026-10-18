@@ -150,6 +150,14 @@ describe("one shared Slack app across two machines", () => {
     expect(await answer(hub, "orch-advisor@v-build", row.qitemId, "Seen")).toMatchObject({ channel: "C0BUILD", thread_ts: "730.1" });
   });
 
+  it("a machine without its own connection reports that it can take relayed events, and how many have arrived", async () => {
+    expect(vps.wire!.status()).toMatchObject({ inboundReady: false, relayedInbound: { accepting: true, received: 0 } });
+    expect(vps.wire!.status()).not.toHaveProperty("inboundRelayed");
+    await say("C0VPS04", "960.1");
+    expect(vps.wire!.status()).toMatchObject({ relayedInbound: { accepting: true, received: 1 } });
+    expect(hub.wire!.status()).not.toHaveProperty("relayedInbound");
+  });
+
   it("P8: an unregistered sender is still refused on the machine that owns the channel", async () => {
     await say("C0VPS04", "740.1", "USTRANGER");
     await new Promise((r) => setTimeout(r, 100));

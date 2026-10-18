@@ -79,6 +79,11 @@ describe("where a person's new message in a channel goes", () => {
     expect(resolveInboundChannelDestination(cfg([{ match: "unknown-rig", channel: "C0U" }]), "C0U", rep)).toBeNull();
   });
 
+  it("a rig entry on the machine's own channel doesn't move that channel's messages; an explicit inbound there still does", () => {
+    expect(resolveInboundChannelDestination(cfg([{ match: "workshop", channel: "C0MACHINE" }]), "C0MACHINE", rep)).toBeNull();
+    expect(resolveInboundChannelDestination(cfg([{ match: "workshop", channel: "C0MACHINE", inbound: "dev-qa@workshop" }]), "C0MACHINE", rep)).toBe("dev-qa@workshop");
+  });
+
   it("`inbound` must be a seat, and set keeps it", () => {
     expect(() => validateChannelMap({ channel: "C0", channelMap: [{ match: "workshop", channel: "C0WS", inbound: "not-a-seat" }] })).toThrow(/inbound must be a seat/);
     expect(setChannelMapEntry([], { match: "workshop", channel: "C0WS", inbound: "dev-qa@workshop" })).toEqual([{ match: "workshop", channel: "C0WS", inbound: "dev-qa@workshop" }]);
@@ -172,6 +177,41 @@ describe("the hub relays a channel another machine owns", () => {
     expect(await h.r.retryDeadLetters()).toEqual({ retried: 1, landed: 1 });
     expect(sent).toEqual(["vps04", "vps04"]);
     expect(h.forwardDeadLetter.readAll()).toEqual([]);
+  });
+
+  it("retries this machine's own events first, then sends one failed host a single relay per pass and keeps the rest unsent", async () => {
+    const calls: string[] = [];
+    let up = false;
+    const fs = memFs();
+    const forwardDeadLetter = new DeadLetterStore<{ host: string; envelope: SocketEnvelope }>("/f.jsonl", fs, clock);
+    const deadLetter = new DeadLetterStore<SlackEvent>("/d.jsonl", fs, clock);
+    const r = new InboundRouter({
+      queue: { createQitem: async (input: { qitemId: string }) => { calls.push("local"); if (!up) throw new Error("db busy"); return input.qitemId; } },
+      seen: new SeenStore("/s.jsonl", fs, clock),
+      deadLetter,
+      destination: "orch-advisor@v-build",
+      resolveSender: () => ({ admitted: true, source: "ada@external" }),
+      forward: {
+        hostFor: (c: string | undefined) => (c === "C0A" ? "hostA" : c === "C0B" ? "hostB" : null),
+        send: async (host: string) => { calls.push(host); return host === "hostB" && up ? { ok: true } : { ok: false, error: "network: timeout" }; },
+      },
+      forwardDeadLetter,
+    } as never);
+    const env = (id: string, channel: string, ts: string): SocketEnvelope =>
+      ({ envelope_id: id, type: "events_api", payload: { event: { type: "message", user: "U1", text: "hi", ts, channel } } });
+    for (const [id, channel, ts] of [["a1", "C0A", "700.1"], ["a2", "C0A", "700.2"], ["a3", "C0A", "700.3"], ["b1", "C0B", "700.4"], ["l1", "C0BUILD", "700.5"]] as const) {
+      await handleEnvelope(env(id, channel, ts), () => {}, r);
+    }
+    expect(forwardDeadLetter.readAll()).toHaveLength(4);
+    expect(deadLetter.readAll()).toHaveLength(1);
+    calls.length = 0;
+    up = true; // hostB and the local queue recover; hostA stays down
+    await r.retryDeadLetters();
+    expect(calls).toEqual(["local", "hostA", "hostB"]);
+    expect(deadLetter.readAll()).toEqual([]);
+    const kept = forwardDeadLetter.readAll();
+    expect(kept.map((e) => e.ev.envelope.envelope_id)).toEqual(["a1", "a2", "a3"]);
+    expect(kept.map((e) => e.attempts)).toEqual([2, 1, 1]); // only the one relay actually sent counts an attempt
   });
 
   it("never relays an envelope that was relayed to it", async () => {
