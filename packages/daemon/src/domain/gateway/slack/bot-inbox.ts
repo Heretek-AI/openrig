@@ -66,28 +66,31 @@ export type BotLookup = (botId: string) => Promise<{ ok: true; appId: string } |
 
 /** Per-bot limits, in memory: up to `maxPerHour` posts in any rolling hour. The next one cuts the bot off
  *  for `cooldownMinutes`, and at least until the rolling hour has room again, so the hourly maximum holds
- *  across a cutoff. A daemon restart clears both. */
+ *  across a cutoff. A post counts once by its identity (`channel:ts`): another copy of a post already
+ *  admitted this hour (a retry, or Slack's `message` and `app_mention` pair for one post) is admitted
+ *  without counting again. A daemon restart clears all of it. */
 export class BotLimiter {
-  private readonly admitted = new Map<string, number[]>();
+  private readonly admitted = new Map<string, Array<{ at: number; post: string }>>();
   private readonly cutoffUntil = new Map<string, number>();
   constructor(private readonly now: () => number = Date.now) {}
 
-  check(bot: NamedBot): { admit: true } | { admit: false; until: number; tripped: boolean } {
+  check(bot: NamedBot, post: string): { admit: true } | { admit: false; until: number; tripped: boolean } {
     const now = this.now();
+    const recent = (this.admitted.get(bot.appId) ?? []).filter((p) => now - p.at < HOUR_MS);
+    this.admitted.set(bot.appId, recent);
+    if (recent.some((p) => p.post === post)) return { admit: true };
     const until = this.cutoffUntil.get(bot.appId);
     if (until !== undefined) {
       if (now < until) return { admit: false, until, tripped: false };
       this.cutoffUntil.delete(bot.appId);
     }
-    const recent = (this.admitted.get(bot.appId) ?? []).filter((t) => now - t < HOUR_MS);
-    this.admitted.set(bot.appId, recent);
     if (recent.length >= (bot.maxPerHour ?? DEFAULT_MAX_PER_HOUR)) {
       // recent[0] is the oldest post in the hour; the hour has room once it leaves.
-      const next = Math.max(now + (bot.cooldownMinutes ?? DEFAULT_COOLDOWN_MINUTES) * 60_000, recent[0]! + HOUR_MS);
+      const next = Math.max(now + (bot.cooldownMinutes ?? DEFAULT_COOLDOWN_MINUTES) * 60_000, recent[0]!.at + HOUR_MS);
       this.cutoffUntil.set(bot.appId, next);
       return { admit: false, until: next, tripped: true };
     }
-    recent.push(now);
+    recent.push({ at: now, post });
     return { admit: true };
   }
 }
