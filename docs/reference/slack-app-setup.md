@@ -169,7 +169,9 @@ rig slack channel-map remove pr@my-rig
   --summary "<subject>" --reply-to <the inbound reply's row>`.
   - **A new message a person starts in a rig's channel** goes to that rig's representative, the
     seat the rest of its rig reports to (its one `delegates_to` root). To send it to another seat,
-    name it: `rig slack channel-map set my-rig C0EXAMPLE1 --inbound lead@my-rig`.
+    name it: `rig slack channel-map set my-rig C0EXAMPLE1 --inbound lead@my-rig`. A rig entry on the
+    connector's default channel only sends that rig's posts there: new messages in the default
+    channel still go to the inbound destination, unless the entry names `--inbound`.
   - **Every other new message,** in the default channel or a seat's channel, goes to the
     connector's inbound destination, as does a reply in a thread OpenRig doesn't know, or a rig's
     channel whose representative can't be found.
@@ -180,12 +182,14 @@ rig slack channel-map remove pr@my-rig
 
 Invite the app to every mapped channel (`/invite @OpenRig`). `rig slack verify` checks
 membership in the default channel and every mapped channel, and reports NOT ready until the
-app is in all of them. A saved change reaches a running connector when it next rewires:
-`rig slack disable` then `rig slack enable`, or a daemon restart. The TUI's Connections page
-says whether the running configuration matches the file.
+app is in all of them. A saved change reaches a running connector when it next rewires, which a
+daemon restart does (`rig daemon stop`, then `rig daemon start`). `rig slack disable --reason
+"<why>"` then `rig slack enable` rewires too, but alerts still waiting to be posted when it's
+re-enabled are treated as already seen and aren't posted. The TUI's Connections page says whether
+the running configuration matches the file.
 
 The map is stored as `channelMap` in `slack-connector.json`, as a list of `{ "match", "channel" }`
-entries. Saving refuses any other field. A field written by a newer OpenRig is ignored when the
+entries, each with an optional `"inbound"` seat. Saving refuses any other field. A field written by a newer OpenRig is ignored when the
 connector reads the file, and `rig slack status` names it. Private channels and direct messages
 are not supported targets.
 
@@ -209,14 +213,25 @@ decisions, and posts its own replies.
   `host` is that machine's id in the hub's host registry (`rig host list`). It needs an http
   entry, which `rig host pair` writes with that machine's token; the hub sends it with each relay,
   and the machine checks it when it has `OPENRIG_AUTH_BEARER_TOKEN` set.
+- **What the receiving machine trusts:** a relayed event comes from whoever holds that machine's
+  daemon token, not from Slack directly, and nothing checks Slack's own signature on it. The
+  machine still looks up the sender in its own list of people, but on a relayed event that's no
+  proof a person just typed or clicked it in Slack: it trusts the caller for where the event came
+  from.
 - **On every other machine:** the same app's bot token only, with no app-level token, so it opens
   no connection of its own. Set its default `channel` to its own channel and, for a rig's channel,
-  a channel map entry. Its connector is enabled as usual.
+  a channel map entry. Its connector is enabled as usual. Its `rig slack status` reports
+  `relayedInbound`: that it can take relayed events, and how many have arrived since it started.
+  It also retries its own kept events every five minutes, including any it kept before it stopped
+  holding a connection of its own, so those still land.
 - **What happens to a message:** the hub relays the event, a reaction or a button click untouched
   to the machine that owns the channel. That machine handles it exactly as if it had received it:
   who may send, where it goes, its thread and its decisions. If the relay fails (the machine is
-  down or its registry entry is wrong), the hub keeps it and retries every five minutes;
-  `rig slack status` counts it in the dead-letter backlog.
+  down or its registry entry is wrong), the hub keeps it and retries every five minutes, after its
+  own kept events and clicks; `rig slack status` counts it in the dead-letter backlog. A machine
+  that's down costs one attempt per retry: its other relays wait for the next one. A relay the
+  machine keeps refusing is kept and retried with no limit, because dropping it would lose a
+  person's message.
 - **Who answered:** every post ends `from <seat> on <machine>`, using the machine's host id (set
   it with `host.name`).
 - **The hub's own channels** are handled on the hub, as before. A channel can be relayed to one
