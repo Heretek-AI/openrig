@@ -37,6 +37,8 @@ describe("#192 channel map through the real Slack wire", () => {
   let nextPost: "ok" | "failed" | "landed" = "ok";
   // The ts the next chat.postMessage returns, when a test needs two roots with one ts in different channels.
   let nextTs: string | undefined;
+  // When set, the next chat.postMessage waits for it before answering: a post whose response is delayed.
+  let holdNext: Promise<void> | undefined;
   let landed: Array<{ channel: string; ts: string; text: string }>;
   let historyChannels: string[];
   let sockets: WsLike[];
@@ -47,7 +49,7 @@ describe("#192 channel map through the real Slack wire", () => {
     home = mkdtempSync(join(tmpdir(), "channel-map-wire-"));
     db = createDb(); migrate(db, ALL_MIGRATIONS);
     repo = new QueueRepository(db, new EventBus(db), { loadHumanRegistry: () => registry });
-    posts = []; historyChannels = []; sockets = []; landed = []; nextPost = "ok"; nextTs = undefined;
+    posts = []; historyChannels = []; sockets = []; landed = []; nextPost = "ok"; nextTs = undefined; holdNext = undefined;
   });
   afterEach(() => { for (const stop of stops.splice(0)) stop(); db.close(); rmSync(home, { recursive: true, force: true }); });
 
@@ -74,6 +76,8 @@ describe("#192 channel map through the real Slack wire", () => {
         posts.push(body);
         const ts = nextTs ?? `${posts.length}.1`;
         nextTs = undefined;
+        const hold = holdNext; holdNext = undefined;
+        if (hold) await hold;
         const mode = nextPost; nextPost = "ok";
         if (mode === "failed") return reply({ ok: false, error: "ratelimited" });
         landed.push({ channel: String(body.channel), ts, text: String(body.text ?? "") });
@@ -240,6 +244,27 @@ describe("#192 channel map through the real Slack wire", () => {
     rewire([{ match: "pr@my-rig", channel: "C0OLD" }], false, "C0NEW");
     const again = await deliverEpisode(a.qitemId, "re-park");
     expect(again).toMatchObject({ channel: "C0OLD", thread_ts: "1.1" }); // A's own root, which U never shared
+  });
+
+  it("an unnamed choice made while its parent update had no root yet still marks the root it took", async () => {
+    rewire(undefined);
+    const a = await ask("s1@my-rig");
+    expect((await deliver(a.qitemId)).thread_ts).toBeUndefined(); // A's root 1.1
+    const b = await ask("s2@my-rig", { humanIntent: "update", summary: "B", body: "B", replyTo: a.qitemId });
+    let release!: () => void;
+    holdNext = new Promise<void>((resolve) => { release = resolve; });
+    const bAlert = (await makeQueuePorts(repo, { loadHumanRegistry: () => registry }).listHumanAlerts({})).find((q) => q.qitemId === b.qitemId);
+    const before = posts.length;
+    expect(wire.dispatcher.dispatch("post_message", human, bAlert)).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(posts.length).toBeGreaterThan(before)); // B posts top-level (A's root is another seat's); its response waits
+    expect(posts.at(-1)!.thread_ts).toBeUndefined();
+    const u = await ask("s1@my-rig", { humanIntent: "update", summary: "U", body: "U", replyTo: b.qitemId });
+    expect(await deliver(u.qitemId)).toMatchObject({ channel: "C0DEFAULT", thread_ts: "1.1" }); // B has no root yet: U takes A's
+    release();
+    await vi.waitFor(() => expect(repo.getById(b.qitemId)?.deliveryOutcome).toBe("posted")); // now B has its own root, 2.1
+    const again = await deliverEpisode(a.qitemId, "re-park");
+    expect(again.channel).toBe("C0DEFAULT");
+    expect(again.thread_ts).toBeUndefined(); // U shared A's root, so A's next decision opens a fresh one
   });
 
   it("isReplyToThread finds a thread choice recorded with or without the channel suffix, and only that exact thread", async () => {
