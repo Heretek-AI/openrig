@@ -469,11 +469,11 @@ export function providerCommand(depsOverride?: StatusDeps): Command {
       if (res.data.outcome === "failed_safely") process.exitCode = 1;
     });
 
-  // OPR.0.7.0.18 — the subscription move record. The fleet-management agent records each move it makes or attempts;
+  // OPR.0.7.0.18 — the subscription move record. The agent that moves seats records each move it makes or attempts;
   // it and the observatory read them back. Labels and references only, never credentials.
   const moves = cmd
     .command("moves")
-    .description("Subscription moves a fleet-management agent recorded, newest first")
+    .description("Recorded subscription moves, newest first")
     .option("--home <home>", "Only moves of this Codex home")
     .option("--seat <seat>", "Only moves that restarted or listed this seat")
     .option("--limit <n>", "At most this many (default 50)")

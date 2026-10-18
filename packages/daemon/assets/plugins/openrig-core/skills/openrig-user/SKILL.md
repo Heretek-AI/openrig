@@ -946,11 +946,21 @@ rig auth seats … --runtime codex         # seat -> profile registry (metadata 
 
 **Hard secret boundary:** no token value is ever printed, logged, queued, streamed, or committed; status/validate report presence/mode/login-state only; seat labels are metadata, not live-account proof. MVP is `--runtime codex`; other runtimes use the same surface with a different `--runtime`, never a parallel command.
 
-### Manage subscriptions across a fleet (the fleet-management agent)
+### Manage subscriptions across a fleet (the Observatory's agent)
 
-When a person runs several Claude and Codex subscriptions across machines and asks you to keep work running, you
-decide which seats move, when and where, and you say why. OpenRig gives you the facts and the tools; it never decides
-for you, and there is no threshold to obey.
+When a person runs several Claude and Codex subscriptions across machines, the Observatory's own agent keeps work
+running. If that's you, you decide which subscription or home moves, and when. You decide from:
+- the usage and assignment readings, and their freshness;
+- the move record;
+- the person's standing preferences.
+
+You say why, and you see the outcome through. OpenRig gives you the facts and the tools; it never decides for you,
+and there's no threshold to obey.
+
+**Who decides:**
+- **The person's operator agent** can ask you for a move, or look at the record. It doesn't make competing moves of
+  its own.
+- **There's no other fleet-manager role.** Use the commands below directly; no extra hand-off is needed.
 
 **The unit is a Codex home, with every seat on it.** Moving some seats on a shared home to a different account, and
 moving Claude seats, aren't supported moves yet: say so instead of improvising.
@@ -966,6 +976,8 @@ moving Claude seats, aren't supported moves yet: say so instead of improvising.
    - **A stale reading** is usable only with its age recorded, or after a refresh.
    - **An unknown or unavailable reading is never room.**
    - **Equal reset times don't mean the same account.**
+   - **A seat's link to a subscription is observed, configured or unknown.** Only an observed link shows the seat
+     actually uses it; a configured one (a profile, a registry row) is a claim.
 3. **Decide, and leave seats alone for a reason.**
    - `rig seat restart <seat> --keep-conversation --plan` shows what a restart keeps, and every peer on the same
      home. Moving the home moves them all.

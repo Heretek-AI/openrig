@@ -228,7 +228,7 @@ export function providerRoutes(opts: ProviderRoutesOptions = {}): Hono {
     return c.json({ signals }, 200);
   });
 
-  // OPR.0.7.0.18 — the subscription move record: what a fleet-management agent reports after it moves (or tries to move)
+  // OPR.0.7.0.18 — the subscription move record: what an agent reports after it moves (or tries to move)
   // a Codex home's seats. Stored in the event log; it holds labels and references only, and decides nothing.
   const movesOf = (c: Context): SubscriptionMoves | null => {
     const bus = c.get("eventBus" as never) as EventBus | undefined;
