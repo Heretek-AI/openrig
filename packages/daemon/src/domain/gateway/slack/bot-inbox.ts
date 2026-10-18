@@ -14,7 +14,7 @@ export interface NamedBot {
   name: string;
   /** Posts delivered in any rolling hour before the bot is cut off. Default 20. */
   maxPerHour?: number;
-  /** How long a cut-off bot stays cut off, in minutes. Default 60. */
+  /** How long a cut-off bot stays cut off at least, in minutes. Default 60. */
   cooldownMinutes?: number;
 }
 
@@ -64,8 +64,9 @@ export function botInboxProblems(cfg: { botInbox?: unknown }): string[] {
  *  failure (kept and retried) from Slack's answer that it can't say (refused and logged). */
 export type BotLookup = (botId: string) => Promise<{ ok: true; appId: string } | { ok: false; retryable: boolean; error: string }>;
 
-/** Per-bot limits, in memory: up to `maxPerHour` posts in any rolling hour; the next one cuts the bot
- *  off for `cooldownMinutes`, after which it starts a fresh hour. A daemon restart clears both. */
+/** Per-bot limits, in memory: up to `maxPerHour` posts in any rolling hour. The next one cuts the bot off
+ *  for `cooldownMinutes`, and at least until the rolling hour has room again, so the hourly maximum holds
+ *  across a cutoff. A daemon restart clears both. */
 export class BotLimiter {
   private readonly admitted = new Map<string, number[]>();
   private readonly cutoffUntil = new Map<string, number>();
@@ -79,14 +80,14 @@ export class BotLimiter {
       this.cutoffUntil.delete(bot.appId);
     }
     const recent = (this.admitted.get(bot.appId) ?? []).filter((t) => now - t < HOUR_MS);
+    this.admitted.set(bot.appId, recent);
     if (recent.length >= (bot.maxPerHour ?? DEFAULT_MAX_PER_HOUR)) {
-      const next = now + (bot.cooldownMinutes ?? DEFAULT_COOLDOWN_MINUTES) * 60_000;
+      // recent[0] is the oldest post in the hour; the hour has room once it leaves.
+      const next = Math.max(now + (bot.cooldownMinutes ?? DEFAULT_COOLDOWN_MINUTES) * 60_000, recent[0]! + HOUR_MS);
       this.cutoffUntil.set(bot.appId, next);
-      this.admitted.delete(bot.appId);
       return { admit: false, until: next, tripped: true };
     }
     recent.push(now);
-    this.admitted.set(bot.appId, recent);
     return { admit: true };
   }
 }

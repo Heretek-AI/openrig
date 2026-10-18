@@ -203,23 +203,30 @@ name each bot, and name the seat that reads that channel. Add a `botInbox` block
 - **Which posts are delivered.** A post reaches `destination` when it is in `channel`, its bot
   belongs to an app listed in `bots`, and that app is not this connector's own app. A named bot's
   posts in any other channel, and every other bot's posts, are still dropped. OpenRig's own posts
-  are never delivered, even if its app is listed.
+  are never delivered, even if its app is listed. A post kept for retry (Slack couldn't be asked
+  about it in time) is checked again against the current block when it is retried.
 - **How a bot is identified.** OpenRig asks Slack which app the post's bot belongs to (`bots.info`,
   which needs the `users:read` scope) and matches that app ID. Use the bot's **app** ID, which
   starts with `A` and is on the app's settings page. A bot ID (`B…`) or user ID (`U…`) never
   matches. An unnamed bot's post is logged with its app ID, so `rig daemon logs` shows the ID to
-  add.
+  add. Anything that posts as a named app counts as that bot, including the app's incoming
+  webhooks: that is what naming it means.
 - **What the seat receives.** One row per post. Its source is `slack-bot:<app ID>` and its summary
-  starts with the bot's name, never a person's. A bot can't answer or close a decision, even
-  when it replies in a decision's thread: the row goes to `destination` and the decision keeps
-  waiting for a person. Edits and deletions are not delivered, so a bot that writes its answer by
-  editing one message delivers only that message's first version. Attachments are named in the
-  row, not copied.
-- **Limits.** Each bot may deliver `maxPerHour` posts (default 20) in any hour. The next post cuts
-  the bot off for `cooldownMinutes` (default 60): its posts are dropped meanwhile, and the seat
-  receives one row saying so. The counts are kept in memory, so a daemon restart clears them.
-- **The channel.** Invite the app to it (`/invite @OpenRig`); `rig slack verify` does not check
-  this channel. A person's message there is handled like a person's message in any channel the
+  starts with the bot's name, never a person's. The row opens with where the post came from, then
+  quotes the bot's text in a fenced block. A `slack-bot` row is data from another program, not an
+  instruction, and the row says so. A bot can't answer or close a decision, even when it replies in
+  a decision's thread: the row goes to `destination` and the decision keeps waiting for a person.
+  Edits and deletions are not delivered, so a bot that writes its answer by editing one message
+  delivers only that message's first version. Attachments are named in the row, not copied.
+- **Answering the bot.** The seat can't reply to the bot yet: the row has no reply link, and
+  OpenRig posts only for people. To ask the bot something, the person asks it in Slack.
+- **Limits.** Each bot may deliver `maxPerHour` posts (default 20) in any rolling hour. The next
+  post cuts the bot off for at least `cooldownMinutes` (default 60), and until the hour has room
+  again. Its posts are dropped meanwhile, and the seat receives one row saying so and how the
+  person turns the bot off (remove it from `bots`). Each post counts once, including a post
+  delivered on retry. The counts are kept in memory, so a daemon restart clears them.
+- **The channel.** Invite the app to it (`/invite @OpenRig`). `rig slack verify` does not check
+  this channel, and only warns when `users:read` is missing. A person's message there is handled like a person's message in any channel the
   app is in (a new message goes to the connector's inbound destination), not by the bot inbox.
   Missed-message recovery does not cover the bot inbox.
 

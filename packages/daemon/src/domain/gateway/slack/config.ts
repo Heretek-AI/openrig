@@ -143,7 +143,7 @@ function botInboxReadiness(cfg: SlackConnectorConfig): ReadinessItem[] {
   return [{
     ok: true,
     label: "bot-inbox",
-    detail: `${bots.length} named bot(s) in ${channel}, delivered to ${destination}; needs users:read and the app in that channel (\`rig slack verify\` checks neither)`,
+    detail: `${bots.length} named bot(s) in ${channel}, delivered to ${destination}; needs users:read and the app in that channel (\`rig slack verify\` only warns on a missing users:read, and doesn't check this channel)`,
   }];
 }
 
