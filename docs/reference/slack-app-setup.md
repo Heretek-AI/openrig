@@ -185,8 +185,8 @@ membership in the default channel and every mapped channel, and reports NOT read
 app is in all of them. A saved change reaches a running connector when it next rewires, which a
 daemon restart does (`rig daemon stop`, then `rig daemon start`). `rig slack disable --reason
 "<why>"` then `rig slack enable` rewires too, but alerts still waiting to be posted when it's
-re-enabled are treated as already seen and aren't posted; only an earlier post that failed or
-didn't finish still posts, if its row is open. The TUI's Connections page says whether the running
+re-enabled are treated as already seen and aren't posted. Only an earlier post that failed or
+didn't finish still posts: an alert whose row is still open, a decision-resolved notice, or a digest. The TUI's Connections page says whether the running
 configuration matches the file.
 
 The map is stored as `channelMap` in `slack-connector.json`, as a list of `{ "match", "channel" }`
