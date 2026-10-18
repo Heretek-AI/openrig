@@ -222,9 +222,10 @@ name each bot, and name the seat that reads that channel. Add a `botInbox` block
   OpenRig posts only for people. To ask the bot something, the person asks it in Slack.
 - **Limits.** Each bot may deliver `maxPerHour` posts (default 20) in any rolling hour. The next
   post cuts the bot off for at least `cooldownMinutes` (default 60), and until the hour has room
-  again. Its posts are dropped meanwhile, and the seat receives one row saying so and how the
-  person turns the bot off (remove it from `bots`). Each post counts once, including a post
-  delivered on retry. The counts are kept in memory, so a daemon restart clears them.
+  again. Its posts are dropped meanwhile, and the seat receives one row saying so (at most one an
+  hour per bot) and how the person turns the bot off (remove it from `bots`, then apply the change
+  as below). Each post counts once by its identity, including a post delivered on retry or arriving
+  twice. The counts are kept in memory, so a daemon restart clears them.
 - **The channel.** Invite the app to it (`/invite @OpenRig`). `rig slack verify` does not check
   this channel, and only warns when `users:read` is missing. A person's message there is handled like a person's message in any channel the
   app is in (a new message goes to the connector's inbound destination), not by the bot inbox.
