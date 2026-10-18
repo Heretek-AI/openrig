@@ -209,6 +209,8 @@ export interface AgentAppLabel {
   limits: string[];
   identity: "not confirmed";
   needsInput: "from the screen only: no app prompt pattern";
+  /** "declared" when the preset has a `session` block (format 2), so a restore can continue the conversation. */
+  resume: "declared" | "not declared";
   /** Set when the preset is missing or can't be used. */
   presetError?: string;
 }
@@ -220,6 +222,7 @@ export function agentAppLabel(runtime: string, dir: string = agentAppsDir()): Ag
     maintainer: found.ok ? found.preset.maintainer : null,
     limits: found.ok ? found.preset.limits : [],
     identity: "not confirmed", needsInput: "from the screen only: no app prompt pattern",
+    resume: found.ok && found.preset.session ? "declared" : "not declared",
     ...(found.ok ? {} : { presetError: found.message }),
   };
 }
