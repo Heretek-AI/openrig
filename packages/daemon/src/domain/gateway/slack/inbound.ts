@@ -710,9 +710,12 @@ export class InboundRouter {
       }
       if (e.ev.bot_id) {
         // A named bot's post whose lookup or create failed: the same admission as live, counted once.
-        const r = await this.attemptBot(e.ev);
+        // It runs on a copy: replaceBatch matches the snapshot's entries by content, so the retained
+        // entry must stay as read; a post retained again carries the copy's admission flag.
+        const ev = { ...e.ev };
+        const r = await this.attemptBot(ev);
         if (r.status === "accepted") landed++;
-        else if (r.status === "handler-failed") stillFailing.push({ ev: e.ev, at: e.at, attempts: e.attempts + 1 });
+        else if (r.status === "handler-failed") stillFailing.push({ ev, at: e.at, attempts: e.attempts + 1 });
         else if (r.reason === "inflight") stillFailing.push(e);
         continue;
       }
