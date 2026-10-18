@@ -13,7 +13,7 @@ import { wrapPaneEnvelope } from "../lib/pane-envelope.js";
 import { renderQueueHandoffNudge } from "./queue-nudge-text.js";
 import { getSelfHostId } from "./hosts/fanout-contract.js";
 import { parseSessionName, isHumanSeatSessionRef } from "./session-name.js";
-import { parseReplyToChoice, formatReplyToChoice, describeReplyToFallback, REPLY_TO_CHOICE_ACTOR, type ReplyToChoice } from "./reply-to-choice.js";
+import { parseReplyToChoice, formatReplyToChoice, describeReplyToFallback, REPLY_TO_CHOICE_ACTOR, REPLY_TO_CHAIN_LIMIT, type ReplyToChoice } from "./reply-to-choice.js";
 import { classifyDestination, type DestinationClass } from "./gateway/destination-resolver.js";
 import {
   computeClosureRequiredAt,
@@ -3386,19 +3386,28 @@ export class QueueRepository {
 
   /** #96 — whether some update recorded this Slack root as the thread it posts into. Such a
    *  root is shared: its owner's next decision must not reuse it (see slack-subsystem). */
-  isReplyToThread(threadTs: string, where?: { channel: string; isDefault: boolean }): boolean {
+  isReplyToThread(threadTs: string, root?: { channel: string; conversationId: string }): boolean {
     if (!this.hasQueueTransitionsTable) return false;
     // Same trust rule as replyToChoiceFor: a pre-provenance schema reads every row as null.
     const provenance = this.hasTransitionProvenanceColumn ? " AND identity_provenance IS NULL" : "";
     const note = formatReplyToChoice({ kind: "thread", threadTs });
-    // A root is its channel's: with `where`, only a choice made in that channel counts. One recorded
-    // without a channel was made in the default channel (choices name any other), so it counts there only.
-    if (where) {
-      const notes = [`${note} channel=${where.channel}`, ...(where.isDefault ? [note] : [])];
+    // A root is its channel's: with `root`, a choice naming its channel counts. One naming no channel was
+    // written for the default channel of its day, which may have changed since; it counts when its own row
+    // replies, through its reply-to chain, to this root's conversation, the identity the choice was made for.
+    if (root) {
+      const named = this.db.prepare(
+        `SELECT 1 FROM queue_transitions WHERE transition_note = ? AND actor_session = ?${provenance} LIMIT 1`,
+      ).get(`${note} channel=${root.channel}`, REPLY_TO_CHOICE_ACTOR) !== undefined;
+      if (named || !this.hasReplyToColumn) return named;
       return this.db.prepare(
-        `SELECT 1 FROM queue_transitions
-          WHERE transition_note IN (${notes.map(() => "?").join(", ")}) AND actor_session = ?${provenance} LIMIT 1`,
-      ).get(...notes, REPLY_TO_CHOICE_ACTOR) !== undefined;
+        `WITH RECURSIVE chain(id, depth) AS (
+           SELECT qitem_id, 0 FROM queue_transitions WHERE transition_note = ? AND actor_session = ?${provenance}
+           UNION ALL
+           SELECT q.reply_to, c.depth + 1 FROM chain c JOIN queue_items q ON q.qitem_id = c.id
+            WHERE q.reply_to IS NOT NULL AND c.depth < ?
+         )
+         SELECT 1 FROM chain WHERE id = ? LIMIT 1`,
+      ).get(note, REPLY_TO_CHOICE_ACTOR, REPLY_TO_CHAIN_LIMIT, root.conversationId) !== undefined;
     }
     // #192: with a channel map the note carries a ` channel=<id>` suffix. Match the exact note, or
     // the exact note followed by that suffix; a prefix compare, not LIKE (the note itself contains

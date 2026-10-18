@@ -38,7 +38,7 @@ import type { HostRegistryLoadResult } from "../../hosts/hosts-registry-reader.j
 import { startSocketInbound, type SocketInboundHandle, type WsLike } from "./socket-inbound.js";
 import { loadHumanRegistry, resolveSlackHandle } from "../human-registry.js";
 import { hasLiveHumanGate, isBlockerLive, type QueueRepository } from "../../queue-repository.js";
-import { formatReplyToChoice, REPLY_TO_CHOICE_ACTOR, type ReplyToChoice } from "../../reply-to-choice.js";
+import { formatReplyToChoice, REPLY_TO_CHOICE_ACTOR, REPLY_TO_CHAIN_LIMIT, type ReplyToChoice } from "../../reply-to-choice.js";
 import { parseSessionName } from "../../session-name.js";
 import type { FetchImpl } from "./slack-api.js";
 import { ownerNotificationLevelAtLeast } from "../../queue-transition-log.js";
@@ -334,7 +334,7 @@ export function buildSlackGatewayWire(opts: SlackWireOpts): GatewayWire {
 
   // #96 — where a replyTo update posts. Walks back through earlier threaded updates (which
   // open no root of their own) to the item that owns the root.
-  const MAX_REPLY_TO_CHAIN = 32;
+  const MAX_REPLY_TO_CHAIN = REPLY_TO_CHAIN_LIMIT;
   const deriveReplyToChoice = (p: OutboundPostPayload, channel: string): ReplyToChoice => {
     let item = p.replyTo ? opts.queueRepo.getById(p.replyTo) : null;
     for (let depth = 0; item && depth < MAX_REPLY_TO_CHAIN; depth++) {
@@ -445,7 +445,7 @@ export function buildSlackGatewayWire(opts: SlackWireOpts): GatewayWire {
           );
           // #96: once an update shares this root, a new decision from its owner starts a fresh
           // root instead, so the decision never lands in a thread a reader took as FYI-only.
-          if (own && !threadReplyTo(p) && opts.queueRepo.isReplyToThread(own.threadTs, { channel: own.channel, isDefault: own.channel === cfg.channel })) return undefined;
+          if (own && !threadReplyTo(p) && opts.queueRepo.isReplyToThread(own.threadTs, { channel: own.channel, conversationId: own.conversationId })) return undefined;
           // #192: with a channel map, a root in another channel than this attempt's (the seat was
           // remapped since this item's root was posted) cannot carry this post, so a fresh root
           // opens in this attempt's channel. Without a map the root is reused as it always was,

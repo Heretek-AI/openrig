@@ -387,9 +387,9 @@ export class InboundRouter {
     const picked = parseQuestionAction(action?.block_id, action?.action_id);
     if (!picked) return { status: "ignored", reason: "not-a-question-button" };
     const rootTs = clickedRootTs(payload);
-    // A root is its channel's, so a click finds its decision by channel too. Slack can name it in the payload or
-    // only in the container (forwarding.ts reads both the same way).
-    const channel = payload.channel?.id ?? payload.container?.channel_id;
+    // A root is its channel's, so a click finds its decision by channel too, read the way the hub reads it to
+    // relay the click (Slack can name it in the payload or only in the container).
+    const channel = envelopeChannel({ type: "interactive", payload });
     // A thread reply about this click: once per live click; the dead-letter retry (live false) only confirms success.
     // A posted reply is recorded in the durable seen store, so a redelivery or a restart doesn't repeat it; one being
     // posted is held in memory, so a redelivery arriving meanwhile is skipped. A reply that failed to post isn't
