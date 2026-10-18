@@ -12,6 +12,7 @@ import Database from "better-sqlite3";
 import { describe, it, expect, vi } from "vitest";
 import type { TmuxAdapter, TmuxResult } from "../src/adapters/tmux.js";
 import {
+  queryOpencodeSessionExists, parseOpencodeMajor, isOpencodePaneCommand,
   OpencodeRuntimeAdapter, buildOpencodeFreshCommand, buildOpencodeResumeCommand,
   buildOpencodeForkCommand, assessOpencodePane, queryLatestOpencodeSessionId,
   queryOpencodeSessionIdsSince,
@@ -73,9 +74,15 @@ function adapterWith(
   extra?: {
     readLatestSessionId?: (cwd: string | null, minTime?: number | null) => Promise<string | null>;
     listSessionIdsSince?: (cwd: string | null, minTime: number) => Promise<string[]>;
+    sessionExists?: (sessionId: string) => Promise<boolean | null>;
+    cliMajor?: () => Promise<number | null>;
   },
 ) {
-  return new OpencodeRuntimeAdapter({ tmux, fsOps: fs, sleep: async () => {}, ...extra });
+  return new OpencodeRuntimeAdapter({
+    tmux, fsOps: fs, sleep: async () => {},
+    sessionExists: async () => null, cliMajor: async () => 1,
+    ...extra,
+  });
 }
 
 // ── command builders ────────────────────────────────────────────────────────
@@ -145,16 +152,55 @@ describe("opencode resume tokens", () => {
 // ── opencode.db session-id query ────────────────────────────────────────────
 
 describe("queryLatestOpencodeSessionId", () => {
-  function scratchDb(rows: Array<{ id: string; directory: string; created: number; updated: number }>): string {
+  type Row = { id: string; directory: string; created: number; updated: number; parent?: string };
+  // `session` is the 1.x table, `session_v2` the 2.0 preview's; both carry
+  // parent_id for subagent (task tool) sessions.
+  function scratchDb(rows: Row[], v2Rows: Row[] | null = null, v1 = true): string {
     const dir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), "opencode-test-"));
     const dbPath = nodePath.join(dir, "opencode.db");
     const db = new Database(dbPath);
-    db.exec("CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)");
-    const stmt = db.prepare("INSERT INTO session (id, directory, time_created, time_updated) VALUES (?, ?, ?, ?)");
-    for (const r of rows) stmt.run(r.id, r.directory, r.created, r.updated);
+    const tables = [...(v1 ? [["session", rows] as const] : []), ...(v2Rows ? [["session_v2", v2Rows] as const] : [])];
+    for (const [table, tableRows] of tables) {
+      db.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)`);
+      const stmt = db.prepare(`INSERT INTO ${table} (id, parent_id, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?)`);
+      for (const r of tableRows) stmt.run(r.id, r.parent ?? null, r.directory, r.created, r.updated);
+    }
     db.close();
     return dbPath;
   }
+
+  it("reads the OpenCode 2.0 session_v2 table when the 1.x table is absent", () => {
+    const dbPath = scratchDb([], [
+      { id: "ses_v2old", directory: "/work", created: 1000, updated: 1000 },
+      { id: SESSION_ID, directory: "/work", created: 2000, updated: 2000 },
+    ], false);
+    expect(queryLatestOpencodeSessionId(dbPath, "/work")).toBe(SESSION_ID);
+    expect(queryOpencodeSessionIdsSince(dbPath, "/work", 1500)).toEqual([SESSION_ID]);
+    expect(queryOpencodeSessionExists(dbPath, "ses_v2old")).toBe(true);
+    expect(queryOpencodeSessionExists(dbPath, "ses_missing")).toBe(false);
+  });
+
+  it("reads both tables when a store holds 1.x and 2.0 sessions", () => {
+    const dbPath = scratchDb(
+      [{ id: "ses_v1", directory: "/work", created: 1000, updated: 3000 }],
+      [{ id: "ses_v2", directory: "/work", created: 2000, updated: 2000 }],
+    );
+    expect(queryLatestOpencodeSessionId(dbPath, "/work")).toBe("ses_v1");
+    expect(queryOpencodeSessionIdsSince(dbPath, "/work", 0)).toEqual(["ses_v1", "ses_v2"]);
+  });
+
+  it("never returns a subagent session, which shares the seat's directory", () => {
+    const dbPath = scratchDb([
+      { id: SESSION_ID, directory: "/work", created: 1000, updated: 1000 },
+      { id: "ses_subagent", directory: "/work", created: 2000, updated: 5000, parent: SESSION_ID },
+    ]);
+    expect(queryLatestOpencodeSessionId(dbPath, "/work")).toBe(SESSION_ID);
+    expect(queryOpencodeSessionIdsSince(dbPath, "/work", 0)).toEqual([SESSION_ID]);
+  });
+
+  it("session existence is null when the store can't be read", () => {
+    expect(queryOpencodeSessionExists("/definitely/missing/opencode.db", SESSION_ID)).toBeNull();
+  });
 
   it("returns the newest session for the cwd, null for unknown dirs and broken stores", () => {
     const dbPath = scratchDb([
@@ -334,6 +380,80 @@ describe("OpencodeRuntimeAdapter.launchHarness", () => {
     if (!result.ok) {
       expect(result.recovery).toBe("attention_required");
       expect(result.evidence).toContain("blew up");
+    }
+  });
+});
+
+// ── OpenCode 2.0 CLI ────────────────────────────────────────────────────────
+
+describe("OpenCode 2.0 CLI", () => {
+  const binding = { tmuxSession: SESSION, cwd: "/work", model: "anthropic/claude-sonnet-4-5" } as never;
+
+  it("reads the major version from both CLIs' --version output", () => {
+    expect(parseOpencodeMajor("1.19.3\n")).toBe(1);
+    expect(parseOpencodeMajor("opencode2 v0.0.0-beta-19271\n")).toBe(2);
+    expect(parseOpencodeMajor("lildax v0.0.0-dev-19272")).toBe(2);
+    expect(parseOpencodeMajor("2.0.1")).toBe(2);
+    expect(parseOpencodeMajor("garbage")).toBeNull();
+  });
+
+  it("recognises the 2.0 TUI's process names as an OpenCode pane", () => {
+    expect(isOpencodePaneCommand("opencode")).toBe(true);
+    expect(isOpencodePaneCommand("opencode2")).toBe(true);
+    expect(isOpencodePaneCommand("lildax")).toBe(true);
+    expect(isOpencodePaneCommand("bash")).toBe(false);
+    expect(assessOpencodePane("opencode2", "Ask anything")).toEqual({ ready: true });
+  });
+
+  it("treats an unrecognized-flag error at the shell as an OpenCode error", () => {
+    expect(assessOpencodePane("bash", "ERROR\n  Unrecognized flag: --model in command opencode2").code).toBe("opencode_error");
+  });
+
+  it("omits --model on 2.0, which has no such flag", async () => {
+    const sendText = vi.fn(async () => ({ ok: true as const }));
+    const adapter = adapterWith(memFs(), mockTmux({ sendText }), { cliMajor: async () => 2 });
+    const result = await adapter.launchHarness(binding, { name: SESSION, resumeToken: SESSION_ID });
+    expect(result.ok).toBe(true);
+    const typed = sendText.mock.calls[0]![1] as string;
+    expect(typed).toContain(`--session '${SESSION_ID}'`);
+    expect(typed).not.toContain("--model");
+  });
+
+  it("refuses fork on 2.0 before typing anything", async () => {
+    const sendText = vi.fn(async () => ({ ok: true as const }));
+    const adapter = adapterWith(memFs(), mockTmux({ sendText }), { cliMajor: async () => 2 });
+    const result = await adapter.launchHarness(binding, { name: SESSION, forkSource: { kind: "native_id", value: SESSION_ID } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/no --fork/);
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
+  it("resume of an id missing from the store is retry_fresh before typing (2.0 would open a blank session)", async () => {
+    const sendText = vi.fn(async () => ({ ok: true as const }));
+    const adapter = adapterWith(memFs(), mockTmux({ sendText }), { sessionExists: async () => false });
+    const result = await adapter.launchHarness(binding, { name: SESSION, resumeToken: SESSION_ID });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.recovery).toBe("retry_fresh");
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
+  it("restore-path resume checks the store first too", async () => {
+    const sendText = vi.fn(async () => ({ ok: true as const }));
+    const resume = new OpencodeResumeAdapter(mockTmux({ sendText }), { sessionExists: async () => false, sleep: async () => {} });
+    const result = await resume.resume(SESSION, "opencode_session_id", SESSION_ID, "/work");
+    expect(result).toMatchObject({ ok: false, code: "retry_fresh" });
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
+  it("uses OPENRIG_OPENCODE_BIN as the executable", async () => {
+    const sendText = vi.fn(async () => ({ ok: true as const }));
+    vi.stubEnv("OPENRIG_OPENCODE_BIN", "opencode2");
+    try {
+      const adapter = adapterWith(memFs(), mockTmux({ sendText, getPaneCommand: async () => "opencode2" }), { cliMajor: async () => 2 });
+      expect((await adapter.launchHarness(binding, { name: SESSION })).ok).toBe(true);
+      expect(sendText.mock.calls[0]![1] as string).toMatch(/^opencode2 '\/work'/);
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 });

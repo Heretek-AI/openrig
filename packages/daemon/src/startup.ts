@@ -525,7 +525,12 @@ export async function createDaemon(opts?: DaemonOptions): Promise<DaemonResult> 
   const serviceOrchestrator = new ServiceOrchestrator({ rigRepo, composeAdapter });
 
   const museResume = new MuseResumeAdapter(tmuxAdapter);
-  const opencodeResume = new OpencodeResumeAdapter(tmuxAdapter);
+  const { defaultOpencodeDbPath, queryOpencodeSessionExists, readOpencodeCliMajor, opencodeBin } = await import("./adapters/opencode-runtime-adapter.js");
+  let opencodeMajor: Promise<number | null> | null = null;
+  const opencodeResume = new OpencodeResumeAdapter(tmuxAdapter, {
+    sessionExists: async (id) => queryOpencodeSessionExists(defaultOpencodeDbPath(), id),
+    cliMajor: () => (opencodeMajor ??= readOpencodeCliMajor(opencodeBin())),
+  });
   const restoreOrchestrator = new RestoreOrchestrator({
     db, rigRepo, sessionRegistry, eventBus, snapshotRepo, snapshotCapture,
     checkpointStore, nodeLauncher, tmuxAdapter, claudeResume, codexResume, piResume, museResume, opencodeResume,

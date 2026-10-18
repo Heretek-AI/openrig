@@ -12,7 +12,7 @@ import type { TmuxAdapter } from "./tmux.js";
 import type { ResumeResult } from "./claude-resume.js";
 import { opencodePostureFlag } from "./yolo-mode.js";
 import { validateResumeToken } from "../domain/resume-token-validation.js";
-import { buildOpencodeResumeCommand } from "./opencode-runtime-adapter.js";
+import { buildOpencodeResumeCommand, isOpencodePaneCommand, opencodeBin } from "./opencode-runtime-adapter.js";
 import { observeOpencodeApproval } from "../domain/permission-drift.js";
 
 export { type ResumeResult };
@@ -21,6 +21,11 @@ const OPENCODE_TYPES = new Set(["opencode_session_id"]);
 const SHELL_COMMANDS = new Set(["bash", "fish", "nu", "sh", "tmux", "zsh"]);
 
 interface OpencodeResumeOptions {
+  /** Whether a session id exists (null = store unreadable). OpenCode 2.0
+   *  opens a blank session for an unknown id, so resume checks first. */
+  sessionExists?: (sessionId: string) => Promise<boolean | null>;
+  /** Major version of the seat's OpenCode CLI; 2.0 has no `--model`. */
+  cliMajor?: () => Promise<number | null>;
   pollMs?: number;
   maxWaitMs?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -62,11 +67,16 @@ export class OpencodeResumeAdapter {
     // (harness-default floor when OFF; --auto when YOLO is ON) — every seat.
     const postureArg = opencodePostureFlag(process.env, resolvedPosture);
     const appliedLaunch = observeOpencodeApproval(postureArg);
+    if (await this.options.sessionExists?.(validation.token).catch(() => null) === false) {
+      return { ok: false, code: "retry_fresh", message: "OpenCode resume failed: no saved session found for the requested id" };
+    }
+    const major = await this.options.cliMajor?.().catch(() => null) ?? null;
     const cmd = buildOpencodeResumeCommand({
       sessionId: validation.token,
       cwd,
-      model: model ?? undefined,
+      model: major === 2 ? undefined : model ?? undefined,
       postureArg,
+      bin: opencodeBin(),
     });
 
     const textResult = await this.tmux.sendText(tmuxSessionName, cmd);
@@ -166,7 +176,7 @@ export function assessOpencodeResumeProbe(
   // A running runtime counts as resumed even when agent output contains
   // error-like text; the login markers below apply only when it does NOT
   // own the pane. Narrow auth phrases still count while it does.
-  if (command === "opencode" || command.startsWith("opencode ")) {
+  if (isOpencodePaneCommand(command)) {
     if (/login required|not authenticated|authentication (failed|required)|please run `?opencode (auth|login)`?/i.test(content)) {
       return "attention_required";
     }

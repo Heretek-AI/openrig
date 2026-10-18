@@ -31,6 +31,7 @@
 
 import nodePath from "node:path";
 import os from "node:os";
+import { execFile } from "node:child_process";
 import Database from "better-sqlite3";
 import type { TmuxAdapter } from "./tmux.js";
 import { opencodePostureFlag } from "./yolo-mode.js";
@@ -47,6 +48,35 @@ import { observeOpencodeApproval } from "../domain/permission-drift.js";
 import { shellQuote } from "./shell-quote.js";
 
 const SHELL_COMMANDS = new Set(["bash", "fish", "nu", "sh", "tmux", "zsh"]);
+
+/** Foreground process names an OpenCode seat can run under. 1.x ships
+ *  `opencode`; the 2.0 preview CLI (@opencode-ai/cli) ships `opencode2`, and
+ *  source builds of it are named `lildax`. 1.x's `/update` upgrades an
+ *  install to 2.0 in place, so `opencode` itself may be either major. */
+export const OPENCODE_PANE_COMMANDS: ReadonlySet<string> = new Set(["opencode", "opencode2", "lildax"]);
+
+/** True when the pane's foreground command is an OpenCode TUI. */
+export function isOpencodePaneCommand(paneCommand: string | null | undefined): boolean {
+  const cmd = (paneCommand ?? "").trim().toLowerCase();
+  const head = cmd.split(/\s+/)[0] ?? "";
+  return OPENCODE_PANE_COMMANDS.has(nodePath.basename(head)) || head === opencodeBin().toLowerCase();
+}
+
+/** The OpenCode executable typed into seats. `OPENRIG_OPENCODE_BIN` selects
+ *  another install (e.g. `opencode2` for the 2.0 preview); default `opencode`. */
+export function opencodeBin(env: NodeJS.ProcessEnv = process.env): string {
+  return env.OPENRIG_OPENCODE_BIN?.trim() || "opencode";
+}
+
+/** Major version of an OpenCode CLI from its `--version` output: 1.x prints
+ *  `1.19.3`; the 2.0 preview prints `opencode2 v0.0.0-beta-19271`. Null when
+ *  the output is not recognised. */
+export function parseOpencodeMajor(versionOutput: string): number | null {
+  const text = versionOutput.trim();
+  if (/^(opencode2|lildax)\b/i.test(text)) return 2;
+  const m = text.match(/(?:^|\s)v?(\d+)\.\d+\.\d+/);
+  return m ? Number(m[1]) : null;
+}
 
 export interface OpencodeAdapterFsOps {
   readFile(path: string): string;
@@ -74,6 +104,14 @@ export interface OpencodeRuntimeAdapterDeps {
    *  tests inject; the default queries opencode.db read-only, [] on ANY
    *  failure). */
   listSessionIdsSince?: (cwd: string | null, minTimeCreatedMs: number) => Promise<string[]>;
+  /** Whether a session id exists in the store: true/false, or null when the
+   *  store can't be read. OpenCode 2.0 opens a blank session for an unknown
+   *  `--session` id instead of erroring, so resume checks first. Tests inject. */
+  sessionExists?: (sessionId: string) => Promise<boolean | null>;
+  /** Major version of the seat's OpenCode CLI (null = unknown, treated as
+   *  1.x). 2.0 has no `--model` or `--fork`. Tests inject; the default runs
+   *  `<bin> --version` once and caches it. */
+  cliMajor?: () => Promise<number | null>;
 }
 
 // ── Pure command builders (single source of truth; hermetically tested) ──
@@ -83,11 +121,13 @@ export interface OpencodeLaunchOpts {
   model?: string;
   /** Already-resolved posture segment (leading space) or "". */
   postureArg: string;
+  /** Executable to type; defaults to `opencode`. */
+  bin?: string;
 }
 
 /** Fresh seat command: `opencode '<cwd>' [--model '<m>'] [--auto]`. */
 export function buildOpencodeFreshCommand(opts: OpencodeLaunchOpts): string {
-  const parts = ["opencode", shellQuote(opts.cwd)];
+  const parts = [opts.bin ?? "opencode", shellQuote(opts.cwd)];
   if (opts.model?.trim()) {
     parts.push("--model", shellQuote(opts.model.trim()));
   }
@@ -99,7 +139,7 @@ export function buildOpencodeFreshCommand(opts: OpencodeLaunchOpts): string {
 /** Resume command: `opencode '<cwd>' --session '<id>' [--model '<m>'] [--auto]`.
  *  Exact-id resume — never bare `--continue` (last-session picker). */
 export function buildOpencodeResumeCommand(opts: OpencodeLaunchOpts & { sessionId: string }): string {
-  const parts = ["opencode", shellQuote(opts.cwd), "--session", shellQuote(opts.sessionId)];
+  const parts = [opts.bin ?? "opencode", shellQuote(opts.cwd), "--session", shellQuote(opts.sessionId)];
   if (opts.model?.trim()) {
     parts.push("--model", shellQuote(opts.model.trim()));
   }
@@ -112,7 +152,7 @@ export function buildOpencodeResumeCommand(opts: OpencodeLaunchOpts & { sessionI
  *  derives a child session; the NEW child id (never the parent's) is the
  *  resume token. */
 export function buildOpencodeForkCommand(opts: OpencodeLaunchOpts & { parentId: string }): string {
-  const parts = ["opencode", shellQuote(opts.cwd), "--session", shellQuote(opts.parentId), "--fork"];
+  const parts = [opts.bin ?? "opencode", shellQuote(opts.cwd), "--session", shellQuote(opts.parentId), "--fork"];
   if (opts.model?.trim()) {
     parts.push("--model", shellQuote(opts.model.trim()));
   }
@@ -125,7 +165,69 @@ export function buildOpencodeForkCommand(opts: OpencodeLaunchOpts & { parentId: 
 export function defaultOpencodeDbPath(homedir?: string): string {
   const dataHome = process.env.XDG_DATA_HOME?.trim()
     || nodePath.join(homedir ?? os.homedir(), ".local", "share");
+  // OPENCODE_DB overrides the store (absolute, or relative to the data dir),
+  // matching opencode's own Database.path().
+  const override = process.env.OPENCODE_DB?.trim();
+  if (override && override !== ":memory:") {
+    return nodePath.isAbsolute(override) ? override : nodePath.join(dataHome, "opencode", override);
+  }
   return nodePath.join(dataHome, "opencode", "opencode.db");
+}
+
+/** The session tables present in an opencode.db: `session` (1.x) and/or
+ *  `session_v2` (2.0 preview). Both key rows on id / directory /
+ *  parent_id / time_created / time_updated. */
+function opencodeSessionTables(db: Database.Database): string[] {
+  const rows = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('session', 'session_v2')",
+  ).all() as Array<{ name: string }>;
+  return rows.map((r) => r.name).sort();
+}
+
+/** Top-level sessions (parent_id IS NULL) across both schemas, newest
+ *  time_updated first. Subagent (task tool) sessions share the seat's
+ *  directory but carry a parent_id, so they are never a seat's token. */
+function selectOpencodeSessions(
+  db: Database.Database,
+  cwd: string | null,
+  minTimeCreatedMs: number | null | undefined,
+  limit?: number,
+): string[] {
+  const tables = opencodeSessionTables(db);
+  if (tables.length === 0) return [];
+  const clauses: string[] = ["parent_id IS NULL"];
+  const params: unknown[] = [];
+  if (cwd) {
+    clauses.push("directory = ?");
+    params.push(cwd);
+  }
+  if (typeof minTimeCreatedMs === "number") {
+    clauses.push("time_created >= ?");
+    params.push(minTimeCreatedMs);
+  }
+  const where = `WHERE ${clauses.join(" AND ")}`;
+  const union = tables.map((t) => `SELECT id, time_updated FROM ${t} ${where}`).join(" UNION ALL ");
+  const allParams = tables.flatMap(() => params);
+  const rows = db.prepare(
+    `SELECT id FROM (${union}) ORDER BY time_updated DESC${limit ? ` LIMIT ${limit}` : ""}`,
+  ).all(...allParams) as Array<{ id: string }>;
+  return rows.map((r) => r.id?.trim() ?? "").filter((id) => id.length > 0);
+}
+
+/** Whether a session id exists in either schema; null on ANY read failure. */
+export function queryOpencodeSessionExists(dbPath: string, sessionId: string): boolean | null {
+  try {
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      const tables = opencodeSessionTables(db);
+      if (tables.length === 0) return null;
+      return tables.some((t) => db.prepare(`SELECT 1 FROM ${t} WHERE id = ?`).get(sessionId) !== undefined);
+    } finally {
+      db.close();
+    }
+  } catch {
+    return null;
+  }
 }
 
 /** Best-effort newest session id for a directory (or global latest when cwd
@@ -142,24 +244,9 @@ export function queryLatestOpencodeSessionId(
   minTimeCreatedMs?: number | null,
 ): string | null {
   try {
-    const db = new Database(dbPath, { readonly: true });
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
     try {
-      const clauses: string[] = [];
-      const params: unknown[] = [];
-      if (cwd) {
-        clauses.push("directory = ?");
-        params.push(cwd);
-      }
-      if (typeof minTimeCreatedMs === "number") {
-        clauses.push("time_created >= ?");
-        params.push(minTimeCreatedMs);
-      }
-      const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-      const row = db.prepare(
-        `SELECT id FROM session ${where} ORDER BY time_updated DESC LIMIT 1`,
-      ).get(...params) as { id: string } | undefined;
-      const id = row?.id?.trim() ?? "";
-      return id.length > 0 ? id : null;
+      return selectOpencodeSessions(db, cwd, minTimeCreatedMs, 1)[0] ?? null;
     } finally {
       db.close();
     }
@@ -179,18 +266,9 @@ export function queryOpencodeSessionIdsSince(
   minTimeCreatedMs: number,
 ): string[] {
   try {
-    const db = new Database(dbPath, { readonly: true });
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
     try {
-      const clauses: string[] = ["time_created >= ?"];
-      const params: unknown[] = [minTimeCreatedMs];
-      if (cwd) {
-        clauses.push("directory = ?");
-        params.push(cwd);
-      }
-      const rows = db.prepare(
-        `SELECT id FROM session WHERE ${clauses.join(" AND ")} ORDER BY time_updated DESC`,
-      ).all(...params) as Array<{ id: string }>;
-      return rows.map((r) => r.id?.trim() ?? "").filter((id) => id.length > 0);
+      return selectOpencodeSessions(db, cwd, minTimeCreatedMs);
     } finally {
       db.close();
     }
@@ -207,6 +285,8 @@ export class OpencodeRuntimeAdapter implements RuntimeAdapter {
   private opencodeDbPath: string;
   private readLatestSessionId: (cwd: string | null, minTimeCreatedMs?: number | null) => Promise<string | null>;
   private listSessionIdsSince: (cwd: string | null, minTimeCreatedMs: number) => Promise<string[]>;
+  private sessionExists: (sessionId: string) => Promise<boolean | null>;
+  private cliMajor: () => Promise<number | null>;
 
   constructor(deps: OpencodeRuntimeAdapterDeps) {
     this.tmux = deps.tmux;
@@ -218,6 +298,10 @@ export class OpencodeRuntimeAdapter implements RuntimeAdapter {
       ?? (async (cwd, minTimeCreatedMs) => queryLatestOpencodeSessionId(dbPath, cwd, minTimeCreatedMs));
     this.listSessionIdsSince = deps.listSessionIdsSince
       ?? (async (cwd, minTimeCreatedMs) => queryOpencodeSessionIdsSince(dbPath, cwd, minTimeCreatedMs));
+    this.sessionExists = deps.sessionExists
+      ?? (async (sessionId) => queryOpencodeSessionExists(dbPath, sessionId));
+    let major: Promise<number | null> | null = null;
+    this.cliMajor = deps.cliMajor ?? (() => (major ??= readOpencodeCliMajor(opencodeBin())));
   }
 
   /** Session-id reader shape resume-token-capture consumes
@@ -351,9 +435,11 @@ export class OpencodeRuntimeAdapter implements RuntimeAdapter {
       if (!parentValidation.ok) {
         return { ok: false, error: `opencode fork: ${parentValidation.error}` };
       }
-      const cmd = buildOpencodeForkCommand({
-        parentId: parentValidation.token, cwd: binding.cwd, model: binding.model, postureArg,
-      });
+      const launch = await this.launchOpts(binding, postureArg);
+      if (launch.major === 2) {
+        return { ok: false, error: "opencode fork: the OpenCode 2.0 CLI has no --fork; fork is supported on OpenCode 1.x only" };
+      }
+      const cmd = buildOpencodeForkCommand({ parentId: parentValidation.token, ...launch.opts });
       // Fork timestamp BEFORE typing: the waiter below only accepts rows
       // created at/after this instant, so a pod-mate's newer pre-existing
       // row can never be mistaken for the fork child.
@@ -379,9 +465,13 @@ export class OpencodeRuntimeAdapter implements RuntimeAdapter {
       if (!validation.ok) {
         return { ok: false, error: `opencode resume: ${validation.error}` };
       }
-      const cmd = buildOpencodeResumeCommand({
-        sessionId: validation.token, cwd: binding.cwd, model: binding.model, postureArg,
-      });
+      // OpenCode 2.0 opens a blank session for an unknown id rather than
+      // erroring in the pane, so a missing id is caught here, before typing.
+      if (await this.sessionExists(validation.token).catch(() => null) === false) {
+        return { ok: false, error: "opencode resume: no saved session found for the requested id", recovery: "retry_fresh" };
+      }
+      const launch = await this.launchOpts(binding, postureArg);
+      const cmd = buildOpencodeResumeCommand({ sessionId: validation.token, ...launch.opts });
       const textResult = await this.tmux.sendText(sessionName, cmd);
       if (!textResult.ok) {
         return { ok: false, error: `Failed to send launch command: ${textResult.message}` };
@@ -395,7 +485,7 @@ export class OpencodeRuntimeAdapter implements RuntimeAdapter {
       return { ok: true, resumeToken: validation.token, resumeType: "opencode_session_id", appliedLaunch };
     }
 
-    const cmd = buildOpencodeFreshCommand({ cwd: binding.cwd, model: binding.model, postureArg });
+    const cmd = buildOpencodeFreshCommand((await this.launchOpts(binding, postureArg)).opts);
     // Launch timestamp BEFORE typing: the capture below only accepts rows
     // created at/after this instant, so a delayed row insert (first prompt)
     // can never resolve to a stale previous-generation or pod-mate session.
@@ -436,6 +526,19 @@ export class OpencodeRuntimeAdapter implements RuntimeAdapter {
   }
 
   // ── internals ──────────────────────────────────────────────────────────────
+
+  /** Launch options for the seat's CLI. OpenCode 2.0 has no `--model`, so the
+   *  model is left to its own config there instead of failing the launch. */
+  private async launchOpts(binding: NodeBinding, postureArg: string): Promise<{ major: number | null; opts: OpencodeLaunchOpts }> {
+    const major = await this.cliMajor().catch(() => null);
+    if (major === 2 && binding.model?.trim()) {
+      console.log(`[openrig] skip: OpenCode 2.0 has no --model; the seat uses its configured model (requested ${binding.model.trim()})`);
+    }
+    return {
+      major,
+      opts: { cwd: binding.cwd, model: major === 2 ? undefined : binding.model, postureArg, bin: opencodeBin() },
+    };
+  }
 
   private projectEntry(entry: ProjectionEntry, binding: NodeBinding): boolean {
     if (entry.category === "guidance" && entry.mergeStrategy === "managed_block") {
@@ -535,7 +638,7 @@ export function assessOpencodePane(
   if (/no (saved )?session found|unknown session|session (id )?not found|no such session/i.test(content)) {
     return { ready: false, reason: "OpenCode reports no saved session for the requested id", code: "no_saved_session" };
   }
-  const runtimeOwnsPane = cmd === "opencode" || cmd.startsWith("opencode ");
+  const runtimeOwnsPane = isOpencodePaneCommand(cmd);
   // A running runtime is up even when agent output contains error-like text
   // (test runs print "exit code 1", tracebacks, ...): the generic markers
   // below apply only when the runtime does NOT own the pane. Narrow auth
@@ -549,7 +652,7 @@ export function assessOpencodePane(
   if (/login required|not authenticated|authentication (failed|required)|please run `?opencode (auth|login)`?/i.test(content)) {
     return { ready: false, reason: "OpenCode reports missing or expired authentication", code: "login_required" };
   }
-  if (/\[opencode\] error|opencode: (error|failed)|exit(ed)?( with)? code \d+|traceback/i.test(content)) {
+  if (/\[opencode\] error|opencode: (error|failed)|unrecognized flag|exit(ed)?( with)? code \d+|traceback/i.test(content)) {
     return { ready: false, reason: "OpenCode reported an error in the pane", code: "opencode_error" };
   }
   if (SHELL_COMMANDS.has(cmd)) {
@@ -559,4 +662,13 @@ export function assessOpencodePane(
     return { ready: false, reason: "OpenCode has not started yet", code: "awaiting_runtime" };
   }
   return { ready: false, reason: `OpenCode pane is running an unexpected foreground process (${paneCommand})`, code: "awaiting_runtime" };
+}
+
+/** `<bin> --version` → major version, or null when it can't be run or read. */
+export function readOpencodeCliMajor(bin: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    execFile(bin, ["--version"], { timeout: 15_000 }, (err, stdout) => {
+      resolve(err ? null : parseOpencodeMajor(String(stdout)));
+    });
+  });
 }

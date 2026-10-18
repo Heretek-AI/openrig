@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import type { RigRepository } from "./rig-repository.js";
 import type { TmuxAdapter } from "../adapters/tmux.js";
 import type { ExecFn } from "../adapters/tmux.js";
+import { shellQuote } from "../adapters/shell-quote.js";
 import type { LegacyRigSpec as RigSpec, PreflightResult, RigSpec as PodRigSpec, RigSpecPod, RigSpecPodMember } from "./types.js"; // TODO: AS-T08b — migrate to pod-aware RigSpec
 import { deriveSessionName, validateSessionName, validateSessionComponents, VIRTUAL_DOMAIN_TOKENS } from "./session-name.js";
 
@@ -486,12 +487,14 @@ export async function verifyOpencodeRuntimeAvailable(
     (pod.members ?? []).some((member: RigSpecPodMember) => member.runtime === "opencode"),
   );
   if (!hasOpencodeMember) return [];
+  // OPENRIG_OPENCODE_BIN selects another install (e.g. the 2.0 preview's `opencode2`).
+  const bin = process.env.OPENRIG_OPENCODE_BIN?.trim() || "opencode";
   try {
-    await exec(RUNTIME_COMMANDS["opencode"]!);
+    await exec(bin === "opencode" ? RUNTIME_COMMANDS["opencode"]! : `${shellQuote(bin)} --version`);
     return [];
   } catch {
     return [
-      `Runtime "opencode" not available ('opencode --version' failed). The spec declares an opencode member, so the launch would fail. Fix: install the OpenCode CLI and ensure 'opencode' is on PATH.`,
+      `Runtime "opencode" not available ('${bin} --version' failed). The spec declares an opencode member, so the launch would fail. Fix: install the OpenCode CLI and ensure '${bin}' is on PATH.`,
     ];
   }
 }
