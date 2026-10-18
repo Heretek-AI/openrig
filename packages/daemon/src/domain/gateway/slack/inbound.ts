@@ -42,6 +42,10 @@ export interface SlackEvent {
   /** The envelope's `api_app_id`: the app RECEIVING the event, ours. Set by handleEnvelope only, and
    *  retained across dead-letter retry; a named bot whose app matches it is OpenRig itself. */
   receivingAppId?: string;
+  /** Internal: a bot post the limiter already admitted whose row is still owed. Set only on the copy
+   *  kept for retry (never on a retained entry in place), so it lands later without being charged again,
+   *  across the hour and a rewire. handleEnvelope clears it from Slack's payload. */
+  botAdmitted?: boolean;
 }
 
 /** #193 — the parts of a Socket Mode `block_actions` payload (a button click) we read. */
@@ -542,14 +546,16 @@ export class InboundRouter {
   async routeBot(ev: SlackEvent, attempts = 0): Promise<{ status: InboundDisposition; reason?: string }> {
     const r = await this.attemptBot(ev);
     if (r.status !== "handler-failed") return r;
-    this.deps.deadLetter.append(ev, attempts + 1);
+    this.deps.deadLetter.append(r.admitted && !ev.botAdmitted ? { ...ev, botAdmitted: true } : ev, attempts + 1);
     this.deps.log?.(`dead-lettered bot post ts=${ev.ts} (attempt ${attempts + 1})`);
     return { status: "dead-lettered", reason: r.reason };
   }
 
   /** The one admission for a bot post, live and on dead-letter retry alike: the current inbox channel,
-   *  the bot's app, and its limit, which counts each post once by its `channel:ts` identity. */
-  private async attemptBot(ev: SlackEvent): Promise<{ status: InboundDisposition; reason?: string }> {
+   *  the bot's app, and its limit, which counts each post once by its `channel:ts` identity. A post the
+   *  limiter already admitted and still owed (`botAdmitted` on its retained copy) skips the limit.
+   *  `admitted` on a failed result says the limit admitted it, so its retained copy is marked. */
+  private async attemptBot(ev: SlackEvent): Promise<{ status: InboundDisposition; reason?: string; admitted?: boolean }> {
     const inbox = this.deps.botInbox;
     if (!inbox || !ev.bot_id) return { status: "ignored", reason: "bot_id" };
     if (ev.channel !== inbox.channel) {
@@ -596,11 +602,13 @@ export class InboundRouter {
         this.deps.log?.(`bot post ignored channel=${ev.channel} app=${appId} bot=${ev.bot_id}: not named in botInbox.bots`);
         return { status: "ignored", reason: "unnamed-bot" };
       }
-      const verdict = this.botLimiter.check(bot, eventId);
-      if (!verdict.admit) {
-        this.deps.log?.(`bot post dropped channel=${ev.channel} app=${appId}: cut off until ${new Date(verdict.until).toISOString()}`);
-        if (verdict.tripped) await this.noticeCutoff(bot, verdict.until);
-        return { status: "refused", reason: "bot-cut-off" };
+      if (!ev.botAdmitted) {
+        const verdict = this.botLimiter.check(bot, eventId);
+        if (!verdict.admit) {
+          this.deps.log?.(`bot post dropped channel=${ev.channel} app=${appId}: cut off until ${new Date(verdict.until).toISOString()}`);
+          if (verdict.tripped) await this.noticeCutoff(bot, verdict.until);
+          return { status: "refused", reason: "bot-cut-off" };
+        }
       }
       const fileNames = files.map((f, i) => {
         const m = (f ?? {}) as { name?: string; id?: string };
@@ -631,7 +639,7 @@ export class InboundRouter {
         });
       } catch (e) {
         this.deps.log?.(`bot post create failed ts=${ev.ts}: ${(e as Error).message}`);
-        return { status: "handler-failed", reason: "create_failed" };
+        return { status: "handler-failed", reason: "create_failed", admitted: true };
       }
       this.deps.seen.mark(eventId, "landed");
       this.deps.log?.(`bot post from ${bot.name} -> ${inbox.destination} (ts=${ev.ts})`);
@@ -651,7 +659,6 @@ export class InboundRouter {
       this.deps.log?.(`bot cut-off notice for ${bot.appId} skipped: one was sent within the hour`);
       return;
     }
-    this.botNoticeAt.set(bot.appId, now);
     const max = bot.maxPerHour ?? DEFAULT_MAX_PER_HOUR;
     const minutes = bot.cooldownMinutes ?? DEFAULT_COOLDOWN_MINUTES;
     const at = new Date(until).toISOString();
@@ -666,11 +673,15 @@ export class InboundRouter {
         body: [
           `${bot.name} (app ${bot.appId}) posted more than ${max} messages in the bot inbox within an hour, its limit.`,
           `OpenRig drops its posts until ${at} (at least ${minutes} minutes, and until the hour has room); none of them reach you meanwhile.`,
+          "A later cutoff can extend this time without another notice within the hour; the daemon log records each one.",
           "If it's caught in a loop, with you or with another bot, tell the person: removing it from botInbox.bots in",
-          "slack-connector.json, then `rig slack disable` and `rig slack enable` (or a daemon restart), turns it off.",
-          "maxPerHour and cooldownMinutes there change its limits, applied the same way.",
+          "slack-connector.json, then a daemon restart (`rig daemon stop`, then `rig daemon start`), turns it off.",
+          "maxPerHour and cooldownMinutes there change its limits, applied the same way. (`rig slack disable --reason \"<why>\"`",
+          "then `rig slack enable` applies it too, but alerts still waiting to be posted when it's re-enabled aren't posted.)",
         ].join("\n"),
       });
+      // Only a notice that exists uses up the hour, so a failed one doesn't silence the next cutoff.
+      this.botNoticeAt.set(bot.appId, now);
     } catch (e) {
       this.deps.log?.(`bot cut-off notice not created for ${bot.appId}: ${(e as Error).message}`);
     }
@@ -714,9 +725,10 @@ export class InboundRouter {
       }
       if (e.ev.bot_id) {
         // A named bot's post whose lookup or create failed: the same admission as live, counted once.
+        // An admitted post kept again is kept as a marked copy; the retained entry is never changed in place.
         const r = await this.attemptBot(e.ev);
         if (r.status === "accepted") landed++;
-        else if (r.status === "handler-failed") stillFailing.push({ ev: e.ev, at: e.at, attempts: e.attempts + 1 });
+        else if (r.status === "handler-failed") stillFailing.push({ ev: r.admitted && !e.ev.botAdmitted ? { ...e.ev, botAdmitted: true } : e.ev, at: e.at, attempts: e.attempts + 1 });
         else if (r.reason === "inflight") stillFailing.push(e);
         continue;
       }
@@ -779,7 +791,7 @@ export async function handleEnvelope(
   }
   if (env.type !== "events_api") return { status: "ignored", reason: "envelope-type" };
   // Only history admission supplies recovery provenance; only the envelope names the receiving app.
-  const ev = { ...env.payload?.event, recoveredAfterGap: undefined, receivingAppId: env.payload?.api_app_id };
+  const ev = { ...env.payload?.event, recoveredAfterGap: undefined, receivingAppId: env.payload?.api_app_id, botAdmitted: undefined };
   // A bot's post in the bot inbox; every other bot post stays dropped by ingestDecision.
   if (ev.bot_id && router.hearsBotsIn(ev.channel)) return router.routeBot(ev);
   const decision = ingestDecision(ev);

@@ -224,8 +224,11 @@ name each bot, and name the seat that reads that channel. Add a `botInbox` block
   post cuts the bot off for at least `cooldownMinutes` (default 60), and until the hour has room
   again. Its posts are dropped meanwhile, and the seat receives one row saying so (at most one an
   hour per bot) and how the person turns the bot off (remove it from `bots`, then apply the change
-  as below). Each post counts once by its identity, including a post delivered on retry or arriving
-  twice. The counts are kept in memory, so a daemon restart clears them.
+  as below). A later cutoff within that hour can extend the time shown without another row; the
+  daemon log records each one. Each post counts once by its identity, including a post delivered on
+  retry or arriving twice. A post already admitted whose row couldn't be created yet is kept and
+  delivered later without counting again, even after its hour or a restart. The counts are kept in
+  memory, so a daemon restart clears them.
 - **The channel.** Invite the app to it (`/invite @OpenRig`). `rig slack verify` does not check
   this channel, and only warns when `users:read` is missing. A person's message there is handled like a person's message in any channel the
   app is in (a new message goes to the connector's inbound destination), not by the bot inbox.
@@ -233,8 +236,10 @@ name each bot, and name the seat that reads that channel. Add a `botInbox` block
 
 `rig slack status` shows a `bot-inbox` line: what it delivers, or why it is off. An invalid block
 (for example a bot ID where an app ID belongs) turns only the bot inbox off. A saved change
-reaches a running connector when it next rewires: `rig slack disable` then `rig slack enable`, or
-a daemon restart.
+reaches a running connector when it next rewires, which a daemon restart does (`rig daemon stop`,
+then `rig daemon start`). `rig slack disable --reason "<why>"` then `rig slack enable` rewires too,
+but alerts still waiting to be posted when it's re-enabled are treated as already seen and aren't
+posted.
 
 ## Reconnect recovery and status
 
