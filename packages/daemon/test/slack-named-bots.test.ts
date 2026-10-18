@@ -201,6 +201,7 @@ describe("named-bot delivery at the gateway boundary", () => {
     // The 30-minute cooldown ends inside the hour, so the cutoff lasts until the hour has room.
     expect(notices[0]!.summary).toBe("Example Bot (Slack bot) cut off until 2026-10-18T07:00:00.000Z: more than 2 posts in an hour");
     expect(notices[0]!.body).toContain("removing it from botInbox.bots");
+    expect(notices[0]!.body).toContain("`rig slack disable` and `rig slack enable`");
     expect(h.rows.filter((r) => !r.tags?.includes("slack-bot-cutoff"))).toHaveLength(2);
     h.advance(30 * 60_000);
     expect(await h.deliver(botPost({ ts: "1.5" }))).toEqual({ status: "refused", reason: "bot-cut-off" });
@@ -231,6 +232,54 @@ describe("named-bot delivery at the gateway boundary", () => {
     expect(await h.router.retryDeadLetters()).toEqual({ retried: 1, landed: 1 });
     expect(h.rows).toHaveLength(1);
     expect(h.rows.filter((r) => r.tags?.includes("slack-bot-cutoff"))).toEqual([]);
+  });
+
+  it("counts a post once by its identity: a live copy after a failed create isn't charged again", async () => {
+    let failCreate = true;
+    const h = harness({ bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 2 }], createFails: () => failCreate });
+    expect((await h.deliver(botPost({ ts: "6.1" }))).status).toBe("dead-lettered"); // counted, its row not created
+    failCreate = false;
+    expect(await h.deliver(botPost({ ts: "6.1", type: "app_mention" }))).toEqual({ status: "accepted", reason: "bot" }); // the same post
+    expect(await h.deliver(botPost({ ts: "6.2" }))).toEqual({ status: "accepted", reason: "bot" }); // the second unique post
+    expect(await h.deliver(botPost({ ts: "6.3" }))).toEqual({ status: "refused", reason: "bot-cut-off" });
+    await h.router.retryDeadLetters(); // the retained copy of 6.1 is now a duplicate
+    expect(h.rows.filter((r) => !r.tags?.includes("slack-bot-cutoff")).map((r) => r.body.match(/ts (\d+\.\d+)/)?.[1])).toEqual(["6.1", "6.2"]);
+    expect(h.dead.readAll()).toEqual([]);
+  });
+
+  it("charges two retained copies of one post once, across failed and successful retries", async () => {
+    let lookupUp = false;
+    let failCreate = true;
+    const h = harness({
+      bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 2 }],
+      lookup: async () => (lookupUp ? { ok: true, appId: BOT_APP } : { ok: false, retryable: true, error: "ratelimited" }),
+      createFails: () => failCreate,
+    });
+    await h.deliver(botPost({ ts: "7.1" }));
+    await h.deliver(botPost({ ts: "7.1", type: "app_mention" }));
+    expect(h.dead.readAll()).toHaveLength(2);
+    lookupUp = true;
+    await h.router.retryDeadLetters(); // both copies admitted, both creates fail
+    expect(h.dead.readAll()).toHaveLength(2);
+    failCreate = false;
+    await h.router.retryDeadLetters(); // one lands, the other is its duplicate
+    expect(h.dead.readAll()).toEqual([]);
+    expect(await h.deliver(botPost({ ts: "7.2" }))).toEqual({ status: "accepted", reason: "bot" }); // only 7.1 was charged
+  });
+
+  it("sends at most one cut-off notice per bot per hour, even with a short cooldown", async () => {
+    const h = harness({ bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 2, cooldownMinutes: 5 }] });
+    const notices = () => h.rows.filter((r) => r.tags?.includes("slack-bot-cutoff"));
+    await h.deliver(botPost({ ts: "8.1" }));
+    h.advance(50 * 60_000);
+    await h.deliver(botPost({ ts: "8.2" }));
+    expect((await h.deliver(botPost({ ts: "8.3" }))).reason).toBe("bot-cut-off"); // first cut-off, until 8.1 leaves the hour
+    expect(notices()).toHaveLength(1);
+    h.advance(10 * 60_000);
+    expect((await h.deliver(botPost({ ts: "8.4" }))).status).toBe("accepted");
+    expect((await h.deliver(botPost({ ts: "8.5" }))).reason).toBe("bot-cut-off"); // a second cut-off, 10 minutes after the first
+    expect(notices()).toHaveLength(1);
+    expect(h.logs.some((l) => l.includes("notice") && l.includes("skipped"))).toBe(true);
   });
 
   it("drops a retained post from a channel that is no longer the bot inbox", async () => {
@@ -279,11 +328,13 @@ describe("BotLimiter", () => {
     let now = 0;
     const limiter = new BotLimiter(() => now);
     const bot = { appId: BOT_APP, name: "b", maxPerHour: 2 };
-    expect(limiter.check(bot).admit).toBe(true);
+    expect(limiter.check(bot, "C:1").admit).toBe(true);
     now = 40 * 60_000;
-    expect(limiter.check(bot).admit).toBe(true);
+    expect(limiter.check(bot, "C:2").admit).toBe(true);
+    expect(limiter.check(bot, "C:2").admit).toBe(true); // the same post again: not counted
     now = 61 * 60_000; // the first post left the hour
-    expect(limiter.check(bot).admit).toBe(true);
+    expect(limiter.check(bot, "C:3").admit).toBe(true);
+    expect(limiter.check(bot, "C:4")).toMatchObject({ admit: false, tripped: true });
   });
 });
 
