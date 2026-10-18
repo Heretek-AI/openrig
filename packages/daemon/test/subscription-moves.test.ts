@@ -2,6 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { createFullTestDb, createTestApp } from "./helpers/test-app.js";
+import { SUBSCRIPTION_MOVE_LIST_SQL, SUBSCRIPTION_MOVE_SHOW_SQL } from "../src/domain/provider/subscription-moves.js";
+import { createDb } from "../src/db/connection.js";
+import { migrate } from "../src/db/migrate.js";
+import { ALL_MIGRATIONS } from "../src/db/all-migrations.js";
 
 const AGENT = "fleet@ops-rig";
 
@@ -59,7 +63,7 @@ describe("subscription move record", () => {
 
   it("lists newest first and filters by home and by seat, peers included", async () => {
     const first = await (await post(move())).json() as { move: { id: string } };
-    const second = await (await post(move({ home: "/home/dev/.codex-team-b", seats: [{ seat: "ops@team", result: "moved" }], peers: undefined }))).json() as { move: { id: string } };
+    const second = await (await post(move({ home: "/home/dev/.codex-team-b", seats: [{ seat: "ops@team", result: "moved", evidence: "verify: moved" }], peers: undefined }))).json() as { move: { id: string } };
 
     const all = await (await get("/api/provider/moves")).json() as { moves: Array<{ id: string }> };
     expect(all.moves.map((m) => m.id)).toEqual([second.move.id, first.move.id]);
@@ -82,7 +86,11 @@ describe("subscription move record", () => {
   });
 
   it.each([
-    ["no seats", move({ seats: [] })],
+    ["no seats and no peers", move({ seats: [], peers: undefined })],
+    ["moved without evidence", move({ seats: [{ seat: "x@team", result: "moved" }] })],
+    ["unconfirmed without what's missing", move({ seats: [{ seat: "x@team", result: "unconfirmed" }] })],
+    ["unknown without what's missing", move({ seats: [{ seat: "x@team", result: "unknown" }] })],
+    ["no readings", move({ readings: [] })],
     ["an unknown result", move({ seats: [{ seat: "x@team", result: "done" }] })],
     ["a reading without a time", move({ readings: [{ subject: "A", observedAt: "yesterday", summary: "92%" }] })],
     ["a lenient non-ISO time", move({ readings: [{ subject: "A", observedAt: "Oct 18 2026", summary: "92%" }] })],
@@ -95,6 +103,40 @@ describe("subscription move record", () => {
     const res = await post(body);
     expect(res.status).toBe(400);
     expect(stored()).toHaveLength(0);
+  });
+
+  it("records a home switch whose seats were all left as peers", async () => {
+    const res = await post(move({ seats: [], peers: [
+      { seat: "dev-impl@team", note: "not restarted; mid-turn" },
+      { seat: "dev-svc@team", note: "not restarted; runs a service" },
+    ] }));
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { move: { seats: unknown[]; peers: unknown[] } }).move).toMatchObject({ seats: [], peers: [{}, {}] });
+  });
+
+  it("records a named operator when no seat identity is present, labelled as claimed", async () => {
+    const res = await post(move({ operator: "alex (terminal)" }), null);
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { move: unknown }).move).toMatchObject({ recordedBy: "alex (terminal)", recordedVia: "claimed:v1" });
+  });
+
+  it("keeps the transport identity over a body operator", async () => {
+    const res = await post(move({ operator: "someone-else" }));
+    expect(((await res.json()) as { move: unknown }).move).toMatchObject({ recordedBy: AGENT });
+    expect(((await (await get("/api/provider/moves")).json()) as { moves: Array<{ recordedVia: string }> }).moves[0]!.recordedVia).toMatch(/^transport/);
+  });
+
+  it("reads moves through the node/type index, not a scan of the event log", () => {
+    // Every migration, as a daemon has (the reduced test schema lacks migration 047's index).
+    const full = createDb(":memory:");
+    migrate(full, ALL_MIGRATIONS);
+    for (const [sql, params] of [[SUBSCRIPTION_MOVE_LIST_SQL, ["subscription.move_recorded"]], [SUBSCRIPTION_MOVE_SHOW_SQL, ["subscription.move_recorded", "x"]]] as const) {
+      const plan = (full.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as Array<{ detail: string }>)
+        .map((row) => row.detail).join(" | ");
+      expect(plan).toContain("idx_events_node_type_seq");
+      expect(plan).not.toMatch(/SCAN events\b(?! USING)/);
+    }
+    full.close();
   });
 
   it("asks for an actor when no seat identity is present, and writes nothing", async () => {

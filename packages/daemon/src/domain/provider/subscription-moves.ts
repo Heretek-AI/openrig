@@ -9,6 +9,13 @@ import type { EventBus } from "../event-bus.js";
 
 export const SUBSCRIPTION_MOVE_EVENT = "subscription.move_recorded" as const;
 
+// Move events carry no node, so `node_id IS NULL` lets both reads use idx_events_node_type_seq (node_id, type, seq)
+// instead of scanning the whole event log, which on a long-lived daemon holds millions of rows.
+export const SUBSCRIPTION_MOVE_LIST_SQL =
+  "SELECT seq, payload, created_at FROM events WHERE node_id IS NULL AND type = ? ORDER BY seq DESC";
+export const SUBSCRIPTION_MOVE_SHOW_SQL =
+  "SELECT seq, payload, created_at FROM events WHERE node_id IS NULL AND type = ? AND json_extract(payload, '$.move.id') = ? ORDER BY seq DESC LIMIT 1";
+
 /** How one seat came out of a move. `moved` needs the restart's uptake evidence (a real turn and the account in use). */
 export type SeatMoveResult = "moved" | "unconfirmed" | "unknown";
 const SEAT_RESULTS: ReadonlySet<string> = new Set(["moved", "unconfirmed", "unknown"]);
@@ -53,12 +60,14 @@ export interface SubscriptionMoveInput {
 }
 
 /** What the event log holds for one move. */
-export type SubscriptionMoveEventPayload = SubscriptionMoveInput & { id: string; recordedBy: string };
+export type SubscriptionMoveEventPayload = SubscriptionMoveInput & { id: string; recordedBy: string; recordedVia: string };
 
 export interface SubscriptionMoveRecord extends SubscriptionMoveInput {
   id: string;
-  /** The seat that recorded it (the caller's transport identity). */
+  /** Who recorded it: the caller's transport identity, or the operator it named when it had none. */
   recordedBy: string;
+  /** How recordedBy is known: the transport identity, or `claimed:v1` for a named operator. */
+  recordedVia: string;
   recordedAt: string;
   seq: number;
 }
@@ -98,15 +107,19 @@ export function parseSubscriptionMove(raw: unknown): SubscriptionMoveInput {
     if (typeof result !== "string" || !SEAT_RESULTS.has(result)) {
       throw new SubscriptionMoveInputError(`seats[${i}].result must be moved, unconfirmed or unknown`);
     }
+    // What the result rests on is part of the record: a move's evidence, or what a lesser result is missing.
+    const evidence = text(seat["evidence"], `seats[${i}].evidence`, result !== "moved");
+    const missing = text(seat["missing"], `seats[${i}].missing`, result === "moved");
     return {
       seat: text(seat["seat"], `seats[${i}].seat`)!,
       result: result as SeatMoveResult,
-      ...(seat["missing"] !== undefined ? { missing: text(seat["missing"], `seats[${i}].missing`)! } : {}),
-      ...(seat["evidence"] !== undefined ? { evidence: text(seat["evidence"], `seats[${i}].evidence`)! } : {}),
+      ...(missing !== undefined ? { missing } : {}),
+      ...(evidence !== undefined ? { evidence } : {}),
     };
   });
-  if (seats.length === 0) throw new SubscriptionMoveInputError("seats must name at least one seat");
-  const readings = list(body["readings"], "readings").map((entry, i) => {
+  const readingList = list(body["readings"], "readings");
+  if (readingList.length === 0) throw new SubscriptionMoveInputError("readings must name what the move acted on");
+  const readings = readingList.map((entry, i) => {
     const reading = object(entry, `readings[${i}]`);
     const observedAt = text(reading["observedAt"], `readings[${i}].observedAt`)!;
     if (!isIsoTimestamp(observedAt)) {
@@ -118,6 +131,8 @@ export function parseSubscriptionMove(raw: unknown): SubscriptionMoveInput {
     const peer = object(entry, `peers[${i}]`);
     return { seat: text(peer["seat"], `peers[${i}].seat`)!, note: text(peer["note"], `peers[${i}].note`)! };
   });
+  // A home switch can leave every seat as a peer (all mid-turn or running services): record that honestly.
+  if (seats.length === 0 && peers.length === 0) throw new SubscriptionMoveInputError("seats or peers must name at least one seat");
   const host = text(body["host"], "host", true);
   const supersedes = text(body["supersedes"], "supersedes", true);
   return {
@@ -136,17 +151,16 @@ export function parseSubscriptionMove(raw: unknown): SubscriptionMoveInput {
 export class SubscriptionMoves {
   constructor(private readonly eventBus: EventBus) {}
 
-  record(input: SubscriptionMoveInput, recordedBy: string): SubscriptionMoveRecord {
+  record(input: SubscriptionMoveInput, recordedBy: string, recordedVia: string): SubscriptionMoveRecord {
     const id = `move-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${randomBytes(4).toString("hex")}`;
-    const persisted = this.eventBus.emit({ type: SUBSCRIPTION_MOVE_EVENT, move: { id, recordedBy, ...input } });
-    return { id, recordedBy, ...input, recordedAt: persisted.createdAt, seq: persisted.seq };
+    const persisted = this.eventBus.emit({ type: SUBSCRIPTION_MOVE_EVENT, move: { id, recordedBy, recordedVia, ...input } });
+    return { id, recordedBy, recordedVia, ...input, recordedAt: persisted.createdAt, seq: persisted.seq };
   }
 
   /** Newest first. A seat filter matches a moved seat or a peer. */
   list(filter: { home?: string; seat?: string; limit?: number } = {}): SubscriptionMoveRecord[] {
-    const rows = this.eventBus.db.prepare(
-      "SELECT seq, payload, created_at FROM events WHERE type = ? ORDER BY seq DESC",
-    ).all(SUBSCRIPTION_MOVE_EVENT) as Array<{ seq: number; payload: string; created_at: string }>;
+    const rows = this.eventBus.db.prepare(SUBSCRIPTION_MOVE_LIST_SQL)
+      .all(SUBSCRIPTION_MOVE_EVENT) as Array<{ seq: number; payload: string; created_at: string }>;
     const records: SubscriptionMoveRecord[] = [];
     for (const row of rows) {
       const record = toRecord(row);
@@ -160,9 +174,8 @@ export class SubscriptionMoves {
   }
 
   show(id: string): SubscriptionMoveRecord | null {
-    const row = this.eventBus.db.prepare(
-      "SELECT seq, payload, created_at FROM events WHERE type = ? AND json_extract(payload, '$.move.id') = ? ORDER BY seq DESC LIMIT 1",
-    ).get(SUBSCRIPTION_MOVE_EVENT, id) as { seq: number; payload: string; created_at: string } | undefined;
+    const row = this.eventBus.db.prepare(SUBSCRIPTION_MOVE_SHOW_SQL)
+      .get(SUBSCRIPTION_MOVE_EVENT, id) as { seq: number; payload: string; created_at: string } | undefined;
     return row ? toRecord(row) : null;
   }
 }

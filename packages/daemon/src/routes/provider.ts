@@ -267,9 +267,11 @@ export function providerRoutes(opts: ProviderRoutesOptions = {}): Hono {
       if (error instanceof SubscriptionMoveInputError) return c.json({ error: error.message }, 400);
       throw error;
     }
-    const identity = requireSenderIdentity(c, { verb: "a subscription move" });
+    // A person recording from a terminal with no seat identity can name themselves; a transport identity wins.
+    const operator = (raw as Record<string, unknown>)["operator"];
+    const identity = requireSenderIdentity(c, { verb: "a subscription move", bodyClaim: typeof operator === "string" ? operator : null });
     if (!identity.ok) return identity.response;
-    return c.json({ move: moves.record(input, identity.session) }, 201);
+    return c.json({ move: moves.record(input, identity.session, identity.provenance) }, 201);
   });
 
   router.get("/precheck", async (c) => {

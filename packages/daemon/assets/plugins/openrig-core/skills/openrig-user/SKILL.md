@@ -975,9 +975,10 @@ moving Claude seats, aren't supported moves yet: say so instead of improvising.
    - On that machine, `CODEX_HOME=<that home> rig auth switch <profile> --runtime codex`. `rig auth` acts on
      `CODEX_HOME`, or on the default home, and `rig auth status` prints which home it means: check it before
      switching.
-   - Then, for each chosen seat: `rig seat restart <seat> --keep-conversation --reason "<why>" --verify
-     --expect-account <the target's Account line>`.
-   - `moved` needs a completed tool turn and a matching Account line. Anything less is unconfirmed.
+   - Then restart each chosen seat: `rig seat restart <seat> --keep-conversation --reason "<why>"`.
+   - After it completes a real tool-using turn, check it: `rig seat restart <seat> --keep-conversation --verify
+     --expect-account <the target's Account line>`. `--verify` only checks; it never restarts. Only that check
+     reports `moved`, and anything less is unconfirmed.
    - **A slow reply isn't a failure:** never restart a seat a second time. Follow up at your next look.
 5. **Record every move, partial or unconfirmed included,** with `rig provider moves record --file <move.json>`
    (`--help` shows the shape):
@@ -988,7 +989,9 @@ moving Claude seats, aren't supported moves yet: say so instead of improvising.
    - each seat's result (`moved`, `unconfirmed` or `unknown`) with its evidence or what's missing;
    - the peers, for example "not restarted; account unverified".
 
-   A follow-up that confirms an earlier unconfirmed seat records a new move with `supersedes`. Asked "why did this
+   A seat marked `moved` needs its `evidence`, and an `unconfirmed` or `unknown` one needs what's `missing`. A home
+   switched with every seat left as a peer is still a move to record, with `seats: []`. A follow-up that confirms an
+   earlier unconfirmed seat records a new move with `supersedes`. Asked "why did this
    seat move?", answer from `rig provider moves --seat <seat>`. Never put credentials in a record.
 6. **When a sign-in is needed:**
    - Ask the person once, durably: a queue item to their seat, naming the machine and the subscription.

@@ -498,6 +498,7 @@ export function providerCommand(depsOverride?: StatusDeps): Command {
     .command("record")
     .description("Record a move you made or attempted (JSON: home, host, from, to, reason, readings, seats, peers, supersedes)")
     .requiredOption("--file <path>", "The move as JSON, or - for stdin")
+    .option("--operator <name>", "Who is recording, when this shell has no seat identity (a seat identity wins)")
     .option("--json", "Output as parseable JSON")
     .addHelpText("after", `
 The JSON shape:
@@ -508,7 +509,7 @@ The JSON shape:
     "peers": [{ "seat": "<seat>", "note": "not restarted; account unverified" }],
     "supersedes": "<an earlier move id>" }
 Record unconfirmed and partial moves too. Labels only: never put credentials in a record.`)
-    .action(async (opts: { file: string; json?: boolean }, command: Command) => {
+    .action(async (opts: { file: string; operator?: string; json?: boolean }, command: Command) => {
       const json = opts.json || command.parent?.opts().json;
       let body: unknown;
       try {
@@ -522,6 +523,9 @@ Record unconfirmed and partial moves too. Labels only: never put credentials in 
       if (!client) {
         process.exitCode = 1;
         return;
+      }
+      if (opts.operator && body !== null && typeof body === "object" && !Array.isArray(body)) {
+        body = { ...(body as Record<string, unknown>), operator: opts.operator };
       }
       const res = await client.post<{ move?: { id?: string } }>("/api/provider/moves", body);
       if (handleHttpError(res, "record move")) return;

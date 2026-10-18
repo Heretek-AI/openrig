@@ -713,7 +713,7 @@ name is not resolved within `<rig>`.
 | `rig provider switch` | — | `--seat <s>` **required**<br>`--to-account <a>` **required**<br>`--force-unsafe`<br>`--json` |
 | `rig provider moves` | — | `--home <home>`<br>`--seat <seat>`<br>`--limit <n>`<br>`--json` |
 | `rig provider moves show` | `<id>` | `--json` |
-| `rig provider moves record` | — | `--file <path>` **required**<br>`--json` |
+| `rig provider moves record` | — | `--file <path>` **required**<br>`--operator <name>`<br>`--json` |
 
 ### usage
 

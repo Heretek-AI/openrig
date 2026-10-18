@@ -70,12 +70,25 @@ describe("rig provider moves", () => {
     expect(JSON.parse(shown.stdout)).toMatchObject({ move: { id: move.id, peers: [{ seat: "dev-svc@team" }] } });
   }, 30_000);
 
+  it("records a named operator from a shell with no seat identity", async () => {
+    const file = path.join(root, "op.json");
+    fs.writeFileSync(file, JSON.stringify({
+      home: "/home/dev/.codex-team-a", from: "codex-sub-A", to: "codex-sub-B", reason: "Moved by hand.",
+      readings: [{ subject: "codex-sub-A weekly", observedAt: "2026-10-18T09:56:00Z", summary: "92% used" }],
+      seats: [{ seat: "dev-impl@team", result: "unconfirmed", missing: "no tool turn yet" }],
+    }));
+    const recorded = await rig(["provider", "moves", "record", "--file", file, "--operator", "alex (terminal)", "--json"], null);
+    expect(recorded.code).toBe(0);
+    expect(JSON.parse(recorded.stdout)).toMatchObject({ move: { recordedBy: "alex (terminal)", recordedVia: "claimed:v1" } });
+  }, 30_000);
+
   it("reports a malformed move and records nothing", async () => {
     const file = path.join(root, "bad.json");
-    fs.writeFileSync(file, JSON.stringify({ home: "h", from: "A", to: "B", reason: "r", readings: [], seats: [] }));
+    fs.writeFileSync(file, JSON.stringify({ home: "h", from: "A", to: "B", reason: "r", seats: [],
+      readings: [{ subject: "A", observedAt: "2026-10-18T09:56:00Z", summary: "92%" }] }));
     const result = await rig(["provider", "moves", "record", "--file", file]);
     expect(result.code).not.toBe(0);
-    expect(result.stdout + result.stderr).toContain("seats must name at least one seat");
+    expect(result.stdout + result.stderr).toContain("seats or peers must name at least one seat");
     expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'subscription.move_recorded'").get()).toEqual({ n: 0 });
   }, 30_000);
 });
