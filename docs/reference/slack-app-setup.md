@@ -185,8 +185,9 @@ membership in the default channel and every mapped channel, and reports NOT read
 app is in all of them. A saved change reaches a running connector when it next rewires, which a
 daemon restart does (`rig daemon stop`, then `rig daemon start`). `rig slack disable --reason
 "<why>"` then `rig slack enable` rewires too, but alerts still waiting to be posted when it's
-re-enabled are treated as already seen and aren't posted. The TUI's Connections page says whether
-the running configuration matches the file.
+re-enabled are treated as already seen and aren't posted; only an earlier post that failed or
+didn't finish still posts, if its row is open. The TUI's Connections page says whether the running
+configuration matches the file.
 
 The map is stored as `channelMap` in `slack-connector.json`, as a list of `{ "match", "channel" }`
 entries, each with an optional `"inbound"` seat. Saving refuses any other field. A field written by a newer OpenRig is ignored when the
@@ -214,7 +215,7 @@ decisions, and posts its own replies.
   entry, which `rig host pair` writes with that machine's token; the hub sends it with each relay,
   and the machine checks it when it has `OPENRIG_AUTH_BEARER_TOKEN` set.
 - **What the receiving machine trusts:** a relayed event comes from whoever holds that machine's
-  daemon token, not from Slack directly, and nothing checks Slack's own signature on it. The
+  daemon token (or, with no token set, anything that can reach its daemon), not from Slack directly, and nothing checks Slack's own signature on it. The
   machine still looks up the sender in its own list of people, but on a relayed event that's no
   proof a person just typed or clicked it in Slack: it trusts the caller for where the event came
   from.
