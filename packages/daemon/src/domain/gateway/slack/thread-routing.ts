@@ -46,7 +46,7 @@ export function makeThreadRouteResolver(opts: {
       // #899 — a reaction names its message by channel and timestamp, and a timestamp is unique only
       // within a channel, so a reaction on another channel's message is not on this ask. A root minted
       // from a person's own message is no ask OpenRig posted, so a reaction on it isn't one either.
-      const sameMessage = ev.type !== "reaction_added" || (mapping?.channel === ev.channel && mapping.origin !== "person");
+      const sameMessage = ev.type !== "reaction_added" || (mapping !== null && mapping.channel === ev.channel && mapping.origin !== "person");
       if (ev.type === "reaction_added" && !(mapping && sameMessage)) {
         // #899 — a reaction on a message OpenRig posted into a thread for an ask (a long ask's reply
         // part, a later notification, an ask posted into another thread) reaches that ask's own seat.
