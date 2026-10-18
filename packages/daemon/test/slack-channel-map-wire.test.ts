@@ -453,11 +453,11 @@ describe("#192 channel map through the real Slack wire", () => {
     const secrets = join(home, "fake.env");
     writeFileSync(secrets, "SLACK_BOT_TOKEN=xoxb-EXAMPLE-fake\n");
     writeFileSync(join(home, "slack-connector.json"), JSON.stringify({ ...DEFAULT_CONFIG, enabled: true, channel: "C0DEFAULT", secretsEnvFile: secrets,
-      channelMap: [{ match: "pr@my-rig", channel: "C0EXAMPLE2", inbound: "lead@my-rig" }] }));
+      channelMap: [{ match: "pr@my-rig", channel: "C0EXAMPLE2", policy: "mention-only" }] }));
     wire = buildSlackGatewayWire({ home, queueRepo: repo, registry: { loadHumanRegistry: () => registry, resolveSlackHandle }, log: (m) => logs.push(m),
       fetchImpl: async (_url, init) => { posts.push(JSON.parse(String(init?.body))); return reply({ ok: true, ts: `${posts.length}.1` }); } });
     stops.push(() => wire.stop()); wire.startServices?.();
-    expect(logs.some((l) => l.includes("IGNORING unsupported field(s) channelMap[0].inbound"))).toBe(true);
+    expect(logs.some((l) => l.includes("IGNORING unsupported field(s) channelMap[0].policy"))).toBe(true);
     const pr = await ask("pr@my-rig");
     expect((await deliver(pr.qitemId)).channel).toBe("C0EXAMPLE2");
   });

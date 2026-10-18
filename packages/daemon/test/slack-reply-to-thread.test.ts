@@ -350,15 +350,21 @@ describe("update --reply-to an earlier item's thread (#96)", () => {
       expect(repo.getById(decision.qitemId)?.state).toBe("pending");
     });
 
-    it("#822: a top-level message records no thread, so its answer still posts top-level", async () => {
+    it("a top-level message is its own answer's root: the seat it reached answers under it", async () => {
       const humanReply = await connectInbound();
       await humanReply(undefined, "904.1");
       const inbound = inboundRow("904.1")!;
       expect(inbound.replyTo).toBeNull();
-      const answer = await repo.create({ ...request, humanIntent: "update", body: "On it.", replyTo: inbound.qitemId });
+      expect(inbound.destinationSession).toBe("operator-agent@kernel");
+      const answer = await repo.create({ ...request, sourceSession: "operator-agent@kernel", humanIntent: "update", body: "On it.", replyTo: inbound.qitemId });
       await deliver(answer.qitemId);
+      expect(posts.at(-1)?.thread_ts).toBe("904.1");
+      expect(repo.getById(answer.qitemId)?.replyToFallback).toBeNull();
+      // Another seat's answer isn't that root's: it posts top-level and says why, as before.
+      const other = await repo.create({ ...request, humanIntent: "update", body: "Me too.", replyTo: inbound.qitemId });
+      await deliver(other.qitemId);
       expect(posts.at(-1)?.thread_ts).toBeUndefined();
-      expect(repo.getById(answer.qitemId)?.replyToFallback).toBe(`root-missing (qitem ${inbound.qitemId})`);
+      expect(repo.getById(other.qitemId)?.replyToFallback).toMatch(/root-other-seat/);
     });
 
     it("#822: a reply's seat parking it on the person still asks in a fresh root, and the answer there resolves the park", async () => {
