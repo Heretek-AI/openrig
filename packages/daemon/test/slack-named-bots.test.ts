@@ -23,7 +23,7 @@ const DECISION_THREAD = "400.0";
 function memFs(): StateFsOps {
   const files = new Map<string, string>();
   return {
-    readFileSync: (p) => { if (!files.has(p)) throw new Error("ENOENT"); return files.get(p)!; },
+    readFileSync: (p) => { if (!files.has(p)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); return files.get(p)!; },
     appendFileSync: (p, d) => files.set(p, (files.get(p) ?? "") + d),
     writeFileSync: (p, d) => files.set(p, d),
     rename: (a, b) => { files.set(b, files.get(a) ?? ""); files.delete(a); },
@@ -205,7 +205,7 @@ describe("named-bot delivery at the gateway boundary", () => {
     expect(notices[0]!.body).toContain("`rig slack disable --reason");
     expect(notices[0]!.body).toContain("A later cutoff can extend this time");
     expect(notices[0]!.body).toContain("none of its new posts reach you meanwhile; a post already admitted still arrives");
-    expect(notices[0]!.body).toContain("earlier posts that failed or didn't finish still post while their rows are open");
+    expect(notices[0]!.body).toContain("Only an earlier post that failed or didn't finish still posts: an alert whose row is still open, a decision-resolved notice, or a digest");
     expect(h.rows.filter((r) => !r.tags?.includes("slack-bot-cutoff"))).toHaveLength(2);
     h.advance(30 * 60_000);
     expect(await h.deliver(botPost({ ts: "1.5" }))).toEqual({ status: "refused", reason: "bot-cut-off" });
@@ -349,6 +349,59 @@ describe("named-bot delivery at the gateway boundary", () => {
     expect(after.rows.map((r) => r.body.match(/ts (\d+\.\d+)/)?.[1])).toEqual(["15.1"]);
     expect(after.dead.readAll()).toEqual([]);
     expect(await after.deliver(botPost({ ts: "15.2" }))).toEqual({ status: "accepted", reason: "bot" }); // 15.1 wasn't charged again
+  });
+
+  it("keeps the owed post when the retained file can't be read again at the end of a retry pass", async () => {
+    const base = memFs();
+    let failMarkedReads = false;
+    const fsops: StateFsOps = {
+      ...base,
+      readFileSync: (p) => {
+        const raw = base.readFileSync(p);
+        if (failMarkedReads && p === "/d.jsonl" && raw.includes('"botAdmitted":true')) throw Object.assign(new Error("EIO: i/o error, read"), { code: "EIO" });
+        return raw;
+      },
+    };
+    let lookupUp = false;
+    let failCreate = true;
+    const h = harness({
+      fsops, bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 1 }], createFails: () => failCreate,
+      lookup: async () => (lookupUp ? { ok: true, appId: BOT_APP } : { ok: false, retryable: true, error: "timeout" }),
+    });
+    expect((await h.deliver(botPost({ ts: "16.1" }))).status).toBe("dead-lettered"); // kept unadmitted: its lookup failed
+    lookupUp = true;
+    failMarkedReads = true;
+    await h.router.retryDeadLetters(); // admitted, its create fails, the marked copy is saved; the final re-read fails
+    failMarkedReads = false;
+    expect(h.dead.readAll().some((e) => e.ev.ts === "16.1" && e.ev.botAdmitted)).toBe(true);
+    failCreate = false;
+    await h.router.retryDeadLetters();
+    expect(h.rows.filter((r) => !r.tags?.includes("slack-bot-cutoff")).map((r) => r.body.match(/ts (\d+\.\d+)/)?.[1])).toEqual(["16.1"]);
+    expect(h.dead.readAll()).toEqual([]);
+  });
+
+  it("keeps a live post for retry, neither charged nor refused, when the retained file can't be read", async () => {
+    const base = memFs();
+    let failReads = false;
+    const fsops: StateFsOps = {
+      ...base,
+      readFileSync: (p) => { if (failReads && p === "/d.jsonl") throw Object.assign(new Error("EIO: i/o error, read"), { code: "EIO" }); return base.readFileSync(p); },
+    };
+    const h = harness({ fsops, bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 1 }] });
+    failReads = true;
+    expect(await h.deliver(botPost({ ts: "17.1" }))).toEqual({ status: "dead-lettered", reason: "retained-unreadable" });
+    failReads = false;
+    await h.router.retryDeadLetters();
+    expect(h.rows.map((r) => r.body.match(/ts (\d+\.\d+)/)?.[1])).toEqual(["17.1"]);
+  });
+
+  it("reads the retained file once for live posts, not on every post", async () => {
+    const base = memFs();
+    let reads = 0;
+    const fsops: StateFsOps = { ...base, readFileSync: (p) => { if (p === "/d.jsonl") reads++; return base.readFileSync(p); } };
+    const h = harness({ fsops, bots: [{ appId: BOT_APP, name: "Example Bot", maxPerHour: 10 }] });
+    for (const ts of ["18.1", "18.2", "18.3", "18.4", "18.5"]) expect((await h.deliver(botPost({ ts }))).status).toBe("accepted");
+    expect(reads).toBeLessThanOrEqual(1);
   });
 
   it("ignores an admission marker in Slack's own payload", async () => {
