@@ -19,7 +19,8 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { buildInProcessWire, type GatewayWire, type SubsystemDeliverFn } from "../gateway-subsystem.js";
 import { DispatchBuffer } from "../dispatch-buffer.js";
-import { downloadPrivateFile, isSlackHost, postChatMessage } from "./slack-api.js";
+import { downloadPrivateFile, isSlackHost, lookupBotApp, postChatMessage } from "./slack-api.js";
+import { botInboxProblems } from "./bot-inbox.js";
 import { loadConfig } from "./config.js";
 import { resolveSecret } from "./secrets.js";
 import { SeenStore, DeadLetterStore, InboundReceiptStore } from "./state-store.js";
@@ -732,8 +733,20 @@ export function buildSlackGatewayWire(opts: SlackWireOpts): GatewayWire {
           log,
         }),
       } : {}),
+      // Named-bot delivery: wired only with a valid botInbox and the bot token bots.info needs.
+      ...(cfg.botInbox && bot && botInboxProblems(cfg).length === 0 ? {
+        botInbox: {
+          channel: cfg.botInbox.channel,
+          destination: cfg.botInbox.destination,
+          bots: cfg.botInbox.bots,
+          lookupBot: (botId: string) => lookupBotApp(bot, botId, opts.fetchImpl),
+        },
+      } : {}),
       log,
     });
+    if (cfg.botInbox && (!bot || botInboxProblems(cfg).length > 0)) {
+      log(`slack bot inbox OFF: ${!bot ? "SLACK_BOT_TOKEN unresolved (bots.info needs it)" : botInboxProblems(cfg).join("; ")}`);
+    }
     recovery = new ChannelRecovery({ channel: cfg.channel, token: bot, stateDir: stateDir(opts.home), router, fetchImpl: opts.fetchImpl });
     starts.push(() => {
       recovery!.initialize(); // persist the once-only floor before any live events

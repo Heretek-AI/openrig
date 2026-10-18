@@ -11,6 +11,7 @@ import { getOpenRigHome } from "../../../openrig-compat.js";
 import { OWNER_NOTIFICATION_LEVELS, type OwnerNotificationLevel } from "../../queue-transition-log.js";
 import { BASELINE_REQUIRED_SCOPES } from "./capabilities.js";
 import { unsupportedChannelMapFields, validateChannelMap, type ChannelMapEntry } from "./channel-map.js";
+import { botInboxProblems, type BotInboxConfig } from "./bot-inbox.js";
 
 export interface SlackConnectorConfig {
   enabled: boolean;
@@ -41,6 +42,12 @@ export interface SlackConnectorConfig {
    * it saves and digests unchanged.
    */
   channelMap?: ChannelMapEntry[];
+  /**
+   * Optional named-bot delivery (bot-inbox.ts): posts by the named bots in one channel reach one seat,
+   * marked as a bot. Absent = every bot post is dropped, as before. Not in DEFAULT_CONFIG, like
+   * `channelMap`. An invalid block leaves the bot inbox off and is named by staticReadiness.
+   */
+  botInbox?: BotInboxConfig;
 }
 
 export const DEFAULT_CONFIG: SlackConnectorConfig = {
@@ -123,7 +130,21 @@ export function staticReadiness(cfg: SlackConnectorConfig, hasBotToken: boolean,
     { ok: Boolean(cfg.inboundDestination), label: "inbound-destination", detail: cfg.inboundDestination },
     { ok: cfg.enabled, label: "enabled", detail: cfg.enabled ? "yes" : "no (run `rig slack enable`)" },
     ...channelMapReadiness(cfg),
+    ...botInboxReadiness(cfg),
   ];
+}
+
+/** One row only when a bot inbox is set: what it delivers, or why it is off. */
+function botInboxReadiness(cfg: SlackConnectorConfig): ReadinessItem[] {
+  if (cfg.botInbox === undefined) return [];
+  const problems = botInboxProblems(cfg);
+  if (problems.length) return [{ ok: false, label: "bot-inbox", detail: `OFF: ${problems.join("; ")}` }];
+  const { channel, destination, bots } = cfg.botInbox;
+  return [{
+    ok: true,
+    label: "bot-inbox",
+    detail: `${bots.length} named bot(s) in ${channel}, delivered to ${destination}; needs users:read and the app in that channel (\`rig slack verify\` checks neither)`,
+  }];
 }
 
 /** #192: one row only when a channel map is set. Fields this version does not support make the

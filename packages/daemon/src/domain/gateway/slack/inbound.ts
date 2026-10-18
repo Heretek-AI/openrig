@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 import { ADMITTED_EVENT_TYPES } from "./capabilities.js";
 import { escapeSlackText, parseQuestionAction, redactSecrets } from "./message.js";
 import { formatHumanAnswers, unansweredQuestions, type RecordHumanAnswerResult } from "../../human-questions.js";
+import { BotLimiter, DEFAULT_MAX_PER_HOUR, DEFAULT_COOLDOWN_MINUTES, type BotLookup, type NamedBot } from "./bot-inbox.js";
 
 export interface SlackEvent {
   type?: string;
@@ -38,6 +39,9 @@ export interface SlackEvent {
   event_ts?: string;
   /** Internal history provenance, retained across dead-letter retry. */
   recoveredAfterGap?: boolean;
+  /** The envelope's `api_app_id`: the app RECEIVING the event, ours. Set by handleEnvelope only, and
+   *  retained across dead-letter retry; a named bot whose app matches it is OpenRig itself. */
+  receivingAppId?: string;
 }
 
 /** #193 — the parts of a Socket Mode `block_actions` payload (a button click) we read. */
@@ -168,6 +172,10 @@ export interface InboundDeps {
    *  a silent drop of message or file. */
   files?: InboundFilePort;
   sourceLabel?: string;
+  /** Named-bot delivery (bot-inbox.ts). Absent → every bot post is dropped. */
+  botInbox?: { channel: string; destination: string; bots: NamedBot[]; lookupBot: BotLookup };
+  /** The clock the per-bot limits read. */
+  now?: () => number;
   log?: (msg: string) => void;
 }
 
@@ -175,7 +183,11 @@ export class InboundRouter {
   private readonly inflight = new Set<string>(); // same-channel message identity double-dispatch guard
   private readonly replyingTo = new Set<string>(); // click replies being posted now
   private retryPass: Promise<{ retried: number; landed: number }> | undefined;
-  constructor(private readonly deps: InboundDeps) {}
+  private readonly botApps = new Map<string, string>(); // bot_id → its app, from bots.info
+  private readonly botLimiter: BotLimiter;
+  constructor(private readonly deps: InboundDeps) {
+    this.botLimiter = new BotLimiter(deps.now);
+  }
 
   private summaryOf(ev: SlackEvent, transfer?: InboundFileResult | null, correlationQitemId?: string): { summary: string; body: string } {
     const text = String(ev.text ?? "");
@@ -513,6 +525,129 @@ export class InboundRouter {
     return { status: "accepted", reason: "reaction" };
   }
 
+  /** Whether a bot's post in this channel is heard: only in the configured bot inbox. */
+  hearsBotsIn(channel?: string): boolean {
+    return !!this.deps.botInbox && channel === this.deps.botInbox.channel;
+  }
+
+  /**
+   * A bot's post in the bot inbox. It reaches the inbox's one seat only when the bot's app (its
+   * `bot_id` resolved with `bots.info`) is named in config, is not OpenRig's own app, and is within
+   * its limits. The row's source is the bot, never a person: no sender registry, no thread map, and
+   * no decision is answered or closed (resolveHumanReply is never called). A lookup that failed in
+   * transport is dead-lettered and retried like a message.
+   */
+  async routeBot(ev: SlackEvent, attempts = 0): Promise<{ status: InboundDisposition; reason?: string }> {
+    const r = await this.attemptBot(ev, true);
+    if (r.status !== "handler-failed") return r;
+    this.deps.deadLetter.append(ev, attempts + 1);
+    this.deps.log?.(`dead-lettered bot post ts=${ev.ts} (attempt ${attempts + 1})`);
+    return { status: "dead-lettered", reason: r.reason };
+  }
+
+  /** `live` false is the dead-letter retry of a post already admitted: its limits were counted then. */
+  private async attemptBot(ev: SlackEvent, live: boolean): Promise<{ status: InboundDisposition; reason?: string }> {
+    const inbox = this.deps.botInbox;
+    if (!inbox || !ev.bot_id) return { status: "ignored", reason: "bot_id" };
+    if (ev.type !== "message" && ev.type !== "app_mention") return { status: "ignored", reason: "type" };
+    // A new post only: edits, deletions and joins are not delivered.
+    if (ev.subtype && ev.subtype !== "bot_message") return { status: "ignored", reason: "subtype" };
+    const files = Array.isArray(ev.files) ? ev.files : [];
+    const text = String(ev.text ?? "");
+    if (!text.trim() && files.length === 0) return { status: "ignored", reason: "empty-text" };
+    const eventId = this.inboundEventId(ev);
+    if (!ev.ts || this.deps.seen.load().has(eventId)) return { status: "ignored", reason: "dup" };
+    if (this.inflight.has(eventId)) return { status: "ignored", reason: "inflight" };
+    this.inflight.add(eventId);
+    try {
+      let appId = this.botApps.get(ev.bot_id);
+      if (!appId) {
+        const found = await inbox.lookupBot(ev.bot_id);
+        if (!found.ok) {
+          this.deps.log?.(`bot post ${found.retryable ? "kept for retry" : "REFUSED"} channel=${ev.channel} bot=${ev.bot_id}: bots.info failed: ${found.error}`);
+          return found.retryable ? { status: "handler-failed", reason: "bot-lookup-failed" } : { status: "refused", reason: "bot-lookup-failed" };
+        }
+        appId = found.appId;
+        this.botApps.set(ev.bot_id, appId);
+      }
+      // OpenRig's own posts are never delivered, whatever the config names.
+      if (!ev.receivingAppId || appId === ev.receivingAppId) {
+        this.deps.log?.(`bot post ignored channel=${ev.channel} app=${appId}: ${ev.receivingAppId ? "OpenRig's own app" : "receiving app unknown"}`);
+        return { status: "ignored", reason: "own-app" };
+      }
+      const bot = inbox.bots.find((b) => b.appId === appId);
+      if (!bot) {
+        this.deps.log?.(`bot post ignored channel=${ev.channel} app=${appId} bot=${ev.bot_id}: not named in botInbox.bots`);
+        return { status: "ignored", reason: "unnamed-bot" };
+      }
+      if (live) {
+        const verdict = this.botLimiter.check(bot);
+        if (!verdict.admit) {
+          this.deps.log?.(`bot post dropped channel=${ev.channel} app=${appId}: cut off until ${new Date(verdict.until).toISOString()}`);
+          if (verdict.tripped) await this.noticeCutoff(bot, verdict.until);
+          return { status: "refused", reason: "bot-cut-off" };
+        }
+      }
+      const fileNames = files.map((f, i) => {
+        const m = (f ?? {}) as { name?: string; id?: string };
+        return String(m.name ?? m.id ?? `file-${i + 1}`);
+      });
+      const headline = text.trim() ? text : fileNames.length ? `[file] ${fileNames[0]}` : text;
+      const thread = ev.thread_ts && ev.thread_ts !== ev.ts ? ` thread_ts=${ev.thread_ts}` : "";
+      try {
+        await this.deps.queue.createQitem({
+          qitemId: this.inboundQitemId(ev),
+          source: `slack-bot:${appId}`,
+          destination: inbox.destination,
+          priority: "routine",
+          tags: ["slack-bot", "inbound"],
+          summary: `${bot.name} (Slack bot): ${headline.slice(0, 90)}`,
+          body: [
+            ...(text ? [text, ""] : []),
+            ...(fileNames.length ? [`Attachments not copied (a bot's post): ${fileNames.join(", ")}`, ""] : []),
+            "---",
+            `Source: Slack bot "${bot.name}" app=${appId} bot=${ev.bot_id} channel=${ev.channel} ts=${ev.ts}${thread}`,
+            "A bot named in this OpenRig's Slack config, not a person: it doesn't answer or close any decision.",
+            "Routed by openrig slack-inbound (bot inbox).",
+          ].join("\n"),
+        });
+      } catch (e) {
+        this.deps.log?.(`bot post create failed ts=${ev.ts}: ${(e as Error).message}`);
+        return { status: "handler-failed", reason: "create_failed" };
+      }
+      this.deps.seen.mark(eventId, "landed");
+      this.deps.log?.(`bot post from ${bot.name} -> ${inbox.destination} (ts=${ev.ts})`);
+      return { status: "accepted", reason: "bot" };
+    } finally {
+      this.inflight.delete(eventId);
+    }
+  }
+
+  /** One row when a bot is cut off, so the seat knows its posts stop arriving. Best effort. */
+  private async noticeCutoff(bot: NamedBot, until: number): Promise<void> {
+    const inbox = this.deps.botInbox!;
+    const max = bot.maxPerHour ?? DEFAULT_MAX_PER_HOUR;
+    const minutes = bot.cooldownMinutes ?? DEFAULT_COOLDOWN_MINUTES;
+    const at = new Date(until).toISOString();
+    try {
+      await this.deps.queue.createQitem({
+        qitemId: `qitem-slack-bot-cutoff-${createHash("sha256").update(`${bot.appId}:${until}`).digest("hex").slice(0, 20)}`,
+        source: "slack-gateway@system",
+        destination: inbox.destination,
+        priority: "routine",
+        tags: ["slack-bot", "slack-bot-cutoff"],
+        summary: `${bot.name} (Slack bot) cut off until ${at}: more than ${max} posts in an hour`,
+        body: [
+          `${bot.name} (app ${bot.appId}) posted more than ${max} messages in the bot inbox within an hour, its limit.`,
+          `OpenRig drops its posts until ${at} (${minutes} minutes); none of them reach you meanwhile.`,
+          "The limits are maxPerHour and cooldownMinutes on its botInbox.bots entry in slack-connector.json.",
+        ].join("\n"),
+      });
+    } catch (e) {
+      this.deps.log?.(`bot cut-off notice not created for ${bot.appId}: ${(e as Error).message}`);
+    }
+  }
+
   /**
    * INTERRUPTION-SAFE retry (item 8): read the durable set NON-destructively,
    * attempt each, then ATOMICALLY replace the file with only the still-failing
@@ -544,6 +679,14 @@ export class InboundRouter {
       if (e.ev.type === "reaction_added") {
         // #899 — a reaction has no message ts of its own; it retries through its own path.
         const r = await this.attemptReaction(e.ev);
+        if (r.status === "accepted") landed++;
+        else if (r.status === "handler-failed") stillFailing.push({ ev: e.ev, at: e.at, attempts: e.attempts + 1 });
+        else if (r.reason === "inflight") stillFailing.push(e);
+        continue;
+      }
+      if (e.ev.bot_id) {
+        // A named bot's post whose lookup or create failed; its limits were counted when it arrived.
+        const r = await this.attemptBot(e.ev, false);
         if (r.status === "accepted") landed++;
         else if (r.status === "handler-failed") stillFailing.push({ ev: e.ev, at: e.at, attempts: e.attempts + 1 });
         else if (r.reason === "inflight") stillFailing.push(e);
@@ -582,7 +725,7 @@ export interface SocketEnvelope {
   envelope_id?: string;
   type?: string;
   reason?: string;
-  payload?: { event?: SlackEvent } & SlackBlockActions;
+  payload?: { event?: SlackEvent; api_app_id?: string } & SlackBlockActions;
 }
 
 /**
@@ -607,7 +750,10 @@ export async function handleEnvelope(
     return router.routeAction(env.payload);
   }
   if (env.type !== "events_api") return { status: "ignored", reason: "envelope-type" };
-  const ev = { ...env.payload?.event, recoveredAfterGap: undefined }; // only history admission supplies recovery provenance
+  // Only history admission supplies recovery provenance; only the envelope names the receiving app.
+  const ev = { ...env.payload?.event, recoveredAfterGap: undefined, receivingAppId: env.payload?.api_app_id };
+  // A bot's post in the bot inbox; every other bot post stays dropped by ingestDecision.
+  if (ev.bot_id && router.hearsBotsIn(ev.channel)) return router.routeBot(ev);
   const decision = ingestDecision(ev);
   if (!decision.ingest) {
     // P28: name the branch that FIRED and the conversation it came from. Privacy rail — a channel
