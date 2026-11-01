@@ -29,7 +29,8 @@ Rebuild the OpenRig web UI (`packages/ui`) so it is friendly to a first-time ope
 10. **Keep these `data-testid`s stable** (dozens of tests depend on them): `app-rail`, `rail-dashboard`, `rail-topology`, `rail-for-you`, `rail-project`, `rail-specs`, `rail-settings`, `rail-advisor`, `rail-operator`, `app-topbar`, `explorer`, `content-area`, `mobile-rail-tray`, `settings-explorer`, `explorer-edge-toggle`. New elements get new testids named in this file.
 11. **Do not copy Paperclip source.** Paperclip is MIT-licensed, so copying is legal with attribution, but it is written for Tailwind 4 and react-router 7 and will not drop in. Read it for layout and behavior only. If you ever paste more than 10 lines from it, add `// Adapted from paperclipai/paperclip (MIT), <path>` above the block and add an entry to the repo `NOTICE` file (create it if missing) with Paperclip's copyright line `Copyright (c) 2025 Paperclip AI`.
 12. **Before every card**, re-read section 7 (Gotchas).
-13. After every card run, in `packages/ui`: `npx tsc --noEmit -p tsconfig.json` (must print nothing and exit 0) and `npx vitest run` (must end with `Test Files  N passed (N)` and **0 failed**). The test count may go *up*, never down, except where a card says otherwise.
+13. **Path convention.** Paths in this brief that start with `src/`, `test/`, `twin/`, `tailwind.config.ts` or `vite.config.ts` are relative to `packages/ui/` (so `src/lib/nav.ts` means `packages/ui/src/lib/nav.ts`). Bare `components/…`, `hooks/…` and `lib/…` mean `packages/ui/src/components/…`, `packages/ui/src/hooks/…`, `packages/ui/src/lib/…`. Paths that start with `packages/`, `docs/`, `scripts/` or `.hermes/` are relative to the repo root. Commands run from `packages/ui` unless the step says "repo root" or shows `cd`.
+14. After every card run, in `packages/ui`: `npx tsc --noEmit -p tsconfig.json` (must print nothing and exit 0) and `npx vitest run` (must end with `Test Files  N passed (N)` and **0 failed**). The test count may go *up*, never down, except where a card says otherwise.
 
 ---
 
@@ -389,9 +390,9 @@ docs/
 |---|---|---|---|
 | C00 | Baseline, branch, notes, before-screenshots | none | none |
 | C01 | Dependencies, test polyfills, capture scripts | C00 | none |
-| C02 | Clean theme tokens + replace the 3 radius/token tests | C01 | C04, C05 |
+| C02 | Clean theme tokens + replace the 3 radius/token tests | C01 | C05 |
 | C03 | Restyle primitives + new primitives | C02 | C04, C05 |
-| C04 | Status vocabulary + StatusBadge | C01 | C02, C03, C05 |
+| C04 | Status vocabulary + StatusBadge | C01, C02 | C03, C05 |
 | C05 | Nav model + chat-target helpers | C01 | C02, C03, C04 |
 | C06 | Sidebar shell (replaces rail) | C03, C04, C05 | none |
 | C07 | Top bar + breadcrumbs | C06 | C08, C09 |
@@ -557,6 +558,7 @@ docs/
      const mode = await p.getAttribute("[data-testid='content-area']", "data-explorer-mode").catch(() => null);
      const out = { width, mode, rail, explorer, content, errors: [] };
      if (!rail) out.errors.push("app-rail not visible");
+     if (!content) out.errors.push("content-area not visible");
      if (rail && explorer && Math.abs(explorer.left - rail.right) > 1) out.errors.push(`explorer.left ${explorer.left} != rail.right ${rail.right}`);
      if (mode === "opaque" && explorer && content && content.left < explorer.right) out.errors.push(`content.left ${content.left} < explorer.right ${explorer.right}`);
      if (rail && content && content.left < rail.right) out.errors.push(`content.left ${content.left} < rail.right ${rail.right}`);
@@ -687,8 +689,9 @@ docs/
      const config = readFileSync(resolve(__dirname, "../tailwind.config.ts"), "utf-8");
      const radiusMatch = config.match(/borderRadius:\s*\{([^}]+)\}/);
      expect(radiusMatch).not.toBeNull();
-     const pairs = [...radiusMatch![1]!.matchAll(/(\w+):\s*"([^"]+)"/g)];
-     expect(pairs.length).toBeGreaterThanOrEqual(6);
+     // Matches bare keys (sm, DEFAULT) and quoted keys ("2xl", "3xl").
+     const pairs = [...radiusMatch![1]!.matchAll(/"?(\w+)"?:\s*"([^"]+)"/g)];
+     expect(pairs.map(([, k]) => k).sort()).toEqual(["2xl", "3xl", "DEFAULT", "full", "lg", "md", "none", "sm", "xl"]);
      for (const [, key, value] of pairs) {
        if (key === "full") expect(value).toBe("9999px");
        else if (key === "none") expect(value).toBe("0px");
@@ -697,7 +700,7 @@ docs/
      const css = readFileSync(resolve(__dirname, "../src/globals.css"), "utf-8");
      expect(css).toMatch(/--radius:\s*0\.5rem;/);
      ```
-   - In `test/design-compliance.test.tsx`, in `it("no non-zero border-radius in any component", …)`: rename it to `it("border radius comes only from the --radius token scale", …)`. Replace the **config loop** (the `for (const [, key, value] of pairs)` block that expects `"0px"`) with the same three-branch loop as above. **Keep** the second half that scans component sources for inline `borderRadius: <number>` and expects 0. Do not touch the other tests in that file.
+   - In `test/design-compliance.test.tsx`, in `it("no non-zero border-radius in any component", …)`: rename it to `it("border radius comes only from the --radius token scale", …)`. Replace the `const pairs = …matchAll(…)` line with the quoted-key-aware regex above (`/"?(\w+)"?:\s*"([^"]+)"/g`), and replace the **config loop** (the `for (const [, key, value] of pairs)` block that expects `"0px"`) with the same three-branch loop as above. **Keep** the second half that scans component sources for inline `borderRadius: <number>` and expects 0. Do not touch the other tests in that file.
 4. Do **not** delete the Vellum `:root` / `.dark` blocks or the `.reg-*` / `.vellum` rules above. Other tests read those CSS sources (`test/registration-marks.test.tsx` asserts the `.reg-*` rules exist). The override block neutralizes them.
 
 **Acceptance:**
@@ -727,7 +730,7 @@ Primitives are used widely (`ui/button` in 22 files, `ui/empty-state` in 22, `ui
    size.default "h-9 px-4", sm "h-8 px-3 text-xs", lg "h-10 px-6", icon "h-9 w-9"
    ```
    Note: `primary.foreground` is already `hsl(var(--background))` in tailwind config, which is correct in both themes.
-2. `components/ui/empty-state.tsx`: keep `EmptyStateProps` and add optional `title?: string`. Render: centered column, `py-12`, icon in a `rounded-lg bg-surface-low p-3 text-on-surface-variant` box, then `title` as `text-sm font-semibold text-on-surface` (fallback to `label`), then `description` as `text-sm text-on-surface-variant max-w-md`, then the action as a `Button` (`size="sm"`). Variant `card` wraps it in `rounded-lg border bg-surface-lowest`. Keep the `testId` and `${testId}-action` testids.
+2. `components/ui/empty-state.tsx`: keep `EmptyStateProps` and add optional `title?: string`. Render: centered column, `py-12`, icon in a `rounded-lg bg-surface-low p-3 text-on-surface-variant` box, then `title` as `text-sm font-semibold text-on-surface` (fallback to `label`), then `description` as `text-sm text-on-surface-variant max-w-md`, then the action as a `Button` (`size="sm"`): when `action.href` is set render `<Button asChild size="sm"><a href={action.href}>{action.label}</a></Button>` (keeps today's link navigation), otherwise `<Button size="sm" onClick={action.onClick}>`. Put `data-testid={testId ? testId + "-action" : undefined}` on the `<a>` or the `<button>`. Variant `card` wraps it in `rounded-lg border bg-surface-lowest`. Keep the `testId` and `${testId}-action` testids.
 3. `components/ui/section-header.tsx` and `components/ui/vellum-card.tsx`: remove `uppercase`, `tracking-*`, `font-mono` from prose text, use `rounded-lg border bg-surface-lowest shadow-sm` for cards and `text-sm font-semibold` for headers. Keep props and testids. Read `test/section-header.test.tsx` and `test/slice-16-typography-vellum.test.tsx` first: they assert some classes. If one asserts `uppercase` or `font-mono` on a header, follow rule 4 (update that one assertion, log it).
 4. New files (each exports exactly what is listed; all use `cn` from `@/lib/utils`):
    ```tsx
@@ -739,7 +742,7 @@ Primitives are used widely (`ui/button` in 22 files, `ui/empty-state` in 22, `ui
      meta?: React.ReactNode;        // a row under the title (badges, ids)
      testId?: string;               // default "page-header"
    }
-   export function PageHeader(props: PageHeaderProps): JSX.Element;
+   export function PageHeader(props: PageHeaderProps): React.JSX.Element;
    // Layout: <header data-testid> flex justify-between items-start gap-4 pb-6;
    // h1 "text-xl font-semibold text-on-surface"; description "mt-1 text-sm text-on-surface-variant".
 
@@ -748,22 +751,22 @@ Primitives are used widely (`ui/button` in 22 files, `ui/empty-state` in 22, `ui
      label: string; value: React.ReactNode; sublabel?: React.ReactNode;
      icon?: React.ComponentType<{ className?: string }>; to?: string; testId?: string;
    }
-   export function MetricTile(props: MetricTileProps): JSX.Element;
+   export function MetricTile(props: MetricTileProps): React.JSX.Element;
    // value "text-3xl font-semibold tabular-nums"; label "text-sm font-medium"; sublabel "text-xs text-on-surface-variant".
    // If `to` is set, wrap in TanStack <Link to={to}> with hover:bg-surface-low.
 
    // components/ui/dropdown-menu.tsx  — re-export Radix with styled Content/Item:
    export const DropdownMenu = RadixDropdown.Root;
    export const DropdownMenuTrigger = RadixDropdown.Trigger;
-   export function DropdownMenuContent(props: RadixDropdown.DropdownMenuContentProps): JSX.Element; // Portal + "z-50 min-w-[10rem] rounded-md border bg-popover p-1 shadow-md", sideOffset default 4
-   export function DropdownMenuItem(props: RadixDropdown.DropdownMenuItemProps & { destructive?: boolean }): JSX.Element; // "flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-surface-low", destructive adds "text-destructive"
+   export function DropdownMenuContent(props: RadixDropdown.DropdownMenuContentProps): React.JSX.Element; // Portal + "z-50 min-w-[10rem] rounded-md border bg-popover p-1 shadow-md", sideOffset default 4
+   export function DropdownMenuItem(props: RadixDropdown.DropdownMenuItemProps & { destructive?: boolean }): React.JSX.Element; // "flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-surface-low", destructive adds "text-destructive"
    export const DropdownMenuSeparator: React.FC; // "my-1 h-px bg-outline-variant"
 
    // components/ui/kbd.tsx
-   export function Kbd({ children }: { children: React.ReactNode }): JSX.Element; // "rounded border bg-surface-low px-1.5 font-mono text-[11px] text-on-surface-variant"
+   export function Kbd({ children }: { children: React.ReactNode }): React.JSX.Element; // "rounded border bg-surface-low px-1.5 font-mono text-[11px] text-on-surface-variant"
 
    // components/ui/skeleton.tsx
-   export function Skeleton({ className }: { className?: string }): JSX.Element; // "animate-pulse rounded-md bg-surface-mid"
+   export function Skeleton({ className }: { className?: string }): React.JSX.Element; // "animate-pulse rounded-md bg-surface-mid"
    ```
 5. Add one test file `test/ui-primitives-v2.test.tsx` with at least: PageHeader renders title/description/actions; MetricTile renders value and links when `to` is set (use `createAppTestRouter` from `test/helpers/test-router.tsx` for the Link case); DropdownMenu opens via `keyDown Enter` and a `destructive` item has class `text-destructive`.
 
@@ -787,7 +790,7 @@ Primitives are used widely (`ui/button` in 22 files, `ui/empty-state` in 22, `ui
    ```
    Algorithm: lowercase and trim `raw`; if empty → `{ tone: "neutral", label: "Unknown" }`. Then look up this table (exact keys); if not found, tone `neutral` and label = raw with `_`/`-` replaced by spaces, first letter uppercased.
    ```ts
-   const TABLE: Record<string, StatusPresentation> = {
+   export const TABLE: Record<string, StatusPresentation> = {
      running:            { tone: "running", label: "Running" },
      active:             { tone: "running", label: "Active" },
      ready:              { tone: "success", label: "Ready" },
@@ -822,12 +825,12 @@ Primitives are used widely (`ui/button` in 22 files, `ui/empty-state` in 22, `ui
    (Respect reduced motion: the `animate-pulse` is fine because Tailwind's `motion-safe:` is not required here; but add `motion-reduce:animate-none` to the running dot.)
 2. Create `src/components/ui/status-badge.tsx`:
    ```tsx
-   export function StatusBadge({ status, label, className, testId }: { status: string | null | undefined; label?: string; className?: string; testId?: string }): JSX.Element;
+   export function StatusBadge({ status, label, className, testId }: { status: string | null | undefined; label?: string; className?: string; testId?: string }): React.JSX.Element;
    // <span data-testid={testId} data-tone={tone} className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium {badge}"> <span dot h-1.5 w-1.5 rounded-full/> {label ?? presented.label}</span>
-   export function StatusDot({ status, className, title }: { status: string | null | undefined; className?: string; title?: string }): JSX.Element;
+   export function StatusDot({ status, className, title }: { status: string | null | undefined; className?: string; title?: string }): React.JSX.Element;
    // <span role="img" aria-label={presented.label} title={title ?? presented.label} data-tone={tone} className="inline-block h-2 w-2 rounded-full {dot}"/>
    ```
-3. `test/status-vocabulary.test.ts`: a table test over **every** key in TABLE, plus: `presentStatus(null)` → Unknown/neutral; `presentStatus("  RUNNING ")` → Running/running; `presentStatus("in_review")` → `{ tone: "neutral", label: "In review" }`. And a render test: `<StatusBadge status="attention_required" testId="b" />` has `data-tone="danger"` and text "Needs attention".
+3. `test/status-vocabulary.test.ts`: import `TABLE` and loop over `Object.entries(TABLE)` (do not copy the keys into the test), plus: `presentStatus(null)` → Unknown/neutral; `presentStatus("  RUNNING ")` → Running/running; `presentStatus("in_review")` → `{ tone: "neutral", label: "In review" }`. And a render test: `<StatusBadge status="attention_required" testId="b" />` has `data-tone="danger"` and text "Needs attention".
 4. Do **not** replace `StatusPip` or `getStatusColorClass` usages in this card. Later cards use `StatusBadge` in the screens they touch.
 
 **Acceptance:** `npx vitest run test/status-vocabulary.test.ts` passes with ≥23 tests; full suite 0 failed.
@@ -915,7 +918,7 @@ This is the riskiest card. Read section 4.7 again first.
    1. Header row: on desktop a collapse toggle button `data-testid="sidebar-toggle"` (`PanelLeftClose` / `PanelLeftOpen` icons, `aria-label` "Collapse sidebar" / "Expand sidebar").
    2. Primary action: `Button` `data-testid="sidebar-new-rig"`, label "New rig", icon `Plus`, links to `/specs/rig` (use `asChild` with `<Link>`). Collapsed → icon-only with tooltip.
    3. Search button `data-testid="sidebar-search"`: label "Search", right side `<Kbd>⌘K</Kbd>`; `onClick` dispatches `window.dispatchEvent(new CustomEvent("openrig:open-palette"))` (C08 listens).
-   4. `NAV_SECTIONS` rendered with `SidebarSection` + `SidebarNavItem`; Inbox item gets `badge` = `useAttentionItems(50).data?.items.length ?? 0`; `SidebarRigList` right after the Rigs item.
+   4. `NAV_SECTIONS` rendered with `SidebarSection` + `SidebarNavItem`; Inbox item gets `badge` = `useAttentionItems(50, useFeedSubscriptions().anyRemoteEnabled).data?.items.length ?? 0` (same subscription-dependent flag `Feed.tsx` passes, verified at `components/for-you/Feed.tsx` ~line 255: `const remoteFeedActive = subs.anyRemoteEnabled; useAttentionItems(50, remoteFeedActive)`; `useFeedSubscriptions` is in `hooks/useFeedSubscriptions.ts`); `SidebarRigList` right after the Rigs item.
    5. Spacer `flex-1`.
    6. Chat group (label "Chat"): `NAV_CHAT` items with `to` from `resolveChatTo(readSettingString(useSettings().data, "agents.<role>_session"), role)`, `activeWhen: () => false`.
    7. `NAV_FOOTER` (Settings).
@@ -939,9 +942,9 @@ This is the riskiest card. Read section 4.7 again first.
 - `npx vitest run test/sidebar.test.tsx test/app-shell.test.tsx` passes; full suite 0 failed.
 - Twin + layout check, each must exit 0:
   ```bash
-  for r in / /specs /project /settings; do TWIN_ROUTE=$r npm run twin:build >/dev/null && node twin/capture/layout-check.cjs twin-out/intent.html 1440 || echo "FAIL $r"; done
+  for r in / /specs /project /settings; do TWIN_ROUTE=$r npm run twin:build >/dev/null && node twin/capture/layout-check.cjs twin-out/intent.html 1440 || { echo "FAIL $r"; exit 1; }; done
   ```
-  (prints no `FAIL` line). For `/specs` the JSON shows `rail.width` 56 (auto-collapsed with explorer) and `explorer.left == rail.right`. For `/` it shows `rail.width` 240.
+  (prints no `FAIL` line and the loop's exit status is 0; run it in a subshell `( … )` so `exit 1` doesn't close your terminal). For `/specs` the JSON shows `rail.width` 56 (auto-collapsed with explorer) and `explorer.left == rail.right`. For `/` it shows `rail.width` 240.
 - `TWIN_ROUTE=/topology/rig/rig_alpha npm run twin:build && node twin/capture/layout-check.cjs twin-out/intent.html` exits 0.
 - At width 800 (`layout-check.cjs … 800`) the desktop sidebar is hidden: the JSON has `"rail":null` and the script exits 1 with `app-rail not visible`. That is the **expected** result on mobile; record it.
 - Screenshot `/` at 1440: labeled sidebar with sections Fleet / Work / Build, "New rig" button, Search ⌘K.
@@ -972,12 +975,12 @@ This is the riskiest card. Read section 4.7 again first.
    | `/project` | `[Projects]` ; `/project/mission/:id` → `[Projects→/project, Mission :id]` ; `/project/slice/:id` → `[Projects→/project, Slice :id]` |
    | `/specs` | `[Library]` ; `/specs/skills` → `[Library→/specs, Skills]` ; `/specs/skills/:t` → `[Library, Skills→/specs/skills, :t]` ; `/specs/plugins` → `[Library→/specs, Plugins]` ; `/plugins/:id` → `[Library→/specs, Plugins→/specs/plugins, :id]` ; any other `/specs/...` → `[Library→/specs, <last segment>]` |
    | `/files` | `[Files]` |
-   | `/settings` | `[Settings]` ; `/settings/policies` → `[Settings→/settings, Policies]` ; `/log` → `Log` ; `/status` → `Status` |
+   | `/settings` | `[Settings]` ; `/settings/policies` → `[Settings→/settings, Policies]` ; `/settings/log` → `[Settings→/settings, Log]` ; `/settings/status` → `[Settings→/settings, Status]` |
    | anything else | `[<last segment, decoded>]` |
    Decode every segment with `decodeURIComponent` inside try/catch.
 2. `src/components/shell/TopBar.tsx`: replaces the contents of the existing `<header data-testid="app-topbar">` (keep that testid and the mobile hamburger button and its testid/behavior). Left: on mobile the hamburger, then on all sizes the breadcrumbs as `<div role="navigation" aria-label="Breadcrumb" data-testid="breadcrumbs">`. Do not use a `<nav>` element: it would be a third `nav` in the SC-1 count. `role="navigation"` on a `div` is fine, because that test queries the tag names `nav, aside` only. Crumbs separated by `ChevronRight h-3.5 w-3.5 text-on-surface-variant`; linked crumbs `text-on-surface-variant hover:text-on-surface`, last crumb `text-on-surface font-medium truncate`. Right: `HostIndicator`, then `ThemeSelector`. Height `h-12`, `border-b bg-background`. Brand: show a small "OpenRig" wordmark (`text-sm font-semibold`) at the far left **only on mobile**; on desktop, put the wordmark in the sidebar header row (C06 header) instead. Keep the brand link `to="/"` and whatever testid the existing brand link has (find it in AppShell; the app-shell test "brand link visible at desktop and links to /" must keep passing: if it requires the brand inside the top bar at desktop, keep a desktop brand in the top bar and log it).
 3. Rig names for crumbs come from `useRigSummary()` (`names.rigName = (id) => data?.find(r => r.id === id)?.name`).
-4. `test/breadcrumbs.test.ts`: one case per table row (≥20 cases), plus a percent-encoded logical id (`/topology/seat/rig_alpha/lead%2Ecoordinator` decodes).
+4. `test/breadcrumbs.test.ts`: one case per table row (≥20 cases, including `/settings/log` and `/settings/status`), plus a percent-encoded logical id (`/topology/seat/rig_alpha/lead%2Ecoordinator` decodes).
 
 **Acceptance:** breadcrumbs test passes; app-shell test passes (log any changed assertion); full suite 0 failed; twin screenshot of `/topology/rig/rig_alpha` shows "Rigs › acme-build" in the top bar.
 
@@ -1029,10 +1032,10 @@ This is the riskiest card. Read section 4.7 again first.
    export interface AgentRow extends NodeInventoryEntry {}
    export function useAllAgents(): { agents: AgentRow[]; isLoading: boolean; error: Error | null };
    ```
-   Implementation: `const ps = usePsEntries();` then `useQueries({ queries: (ps.data ?? []).map(r => ({ queryKey: ["rig", r.rigId, "nodes", hostId], queryFn: () => fetchNodeInventory(r.rigId, hostId), staleTime: 15_000 })) })`. **Reuse the same queryKey shape as `useNodeInventory`** (`["rig", rigId, "nodes", hostId]`) so the caches are shared and SSE invalidation (`useActivityFeed` invalidates `["rig", rigId, "nodes"]`) refreshes it. Export `fetchNodeInventory` from `useNodeInventory.ts` (add `export`, no other change). Filter to `nodeKind === "agent"`. `isLoading` = ps loading or any query loading; `error` = first error.
+   Implementation: `const hostId = useSelectedHostId(); const ps = usePsEntries();` then `useQueries({ queries: (ps.data ?? []).map(r => ({ queryKey: ["rig", r.rigId, "nodes", hostId], queryFn: () => fetchNodeInventory(r.rigId, hostId), staleTime: 15_000 })) })`. **Reuse the same queryKey shape as `useNodeInventory`** (`["rig", rigId, "nodes", hostId]`) so the caches are shared and SSE invalidation (`useActivityFeed` invalidates `["rig", rigId, "nodes"]`) refreshes it. Get `hostId` first, exactly as `useNodeInventory` does: `const hostId = useSelectedHostId();` (from `hooks/useHosts.ts`). Export `fetchNodeInventory` from `useNodeInventory.ts` (add `export`, no other change). Filter to `nodeKind === "agent"`. `isLoading` = ps loading or any query loading; `error` = first error.
 2. Rewrite `components/dashboard/Dashboard.tsx` body (keep the exported name `Dashboard` and keep any testids that existing tests assert: run `grep -l "Dashboard" test/*.tsx` and read them first; keep the kernel card component `KernelStatusCard` reachable, see 2.5). Layout, top to bottom, inside `mx-auto max-w-6xl px-6 py-6`:
    1. `PageHeader title="Dashboard" description="What's running, and what needs you."` with actions: `Button variant="outline"` "Import" → `/import`, `Button` "New rig" → `/specs/rig`.
-   2. **Needs you** (`data-testid="dashboard-needs-you"`): top 5 of `useAttentionItems(50).data.items`, each row: `StatusDot status="attention_required"`, title = `item.summary ?? first line of item.body`, mono `item.sourceSession`, relative time from `tsUpdated` ("5m ago"; write a tiny `relativeTime(iso)` in `lib/relative-time.ts` with tests), and the `VerbActions` component with `bare`, `qitemId`, `actorSession="human@host"`, `enabledVerbs={["approve"]}`, `oneClickVerbs={["approve"]}`. Footer link "Open inbox" → `/for-you`. Empty → `EmptyState title="You're all caught up" label="Nothing needs you" description="Approvals and questions from your agents show up here."`.
+   2. **Needs you** (`data-testid="dashboard-needs-you"`): top 5 of `(useAttentionItems(50, useFeedSubscriptions().anyRemoteEnabled).data?.items ?? [])` (same flag as the Inbox, so remote-host approvals show here too), each row: `StatusDot status="attention_required"`, title = `item.summary ?? first line of item.body`, mono `item.sourceSession`, relative time from `tsUpdated` ("5m ago"; write a tiny `relativeTime(iso)` in `lib/relative-time.ts` with tests), and the `VerbActions` component with `bare`, `qitemId`, `actorSession="human@host"`, `hostId={item.hostId}` (so a remote approval acts on its own host, as `FeedCard.tsx` does), `enabledVerbs={["approve"]}`, `oneClickVerbs={["approve"]}`. Footer link "Open inbox" → `/for-you`. Empty → `EmptyState title="You're all caught up" label="Nothing needs you" description="Approvals and questions from your agents show up here."`.
    3. **Metric tiles** (4-column grid on lg, 2 on sm): "Rigs running" = count of `ps` with `status !== "stopped"`, sublabel "`<n>` total", `to="/topology"`; "Active agents" = sum of `activeCount ?? 0`, sublabel "`<sum runningCount>` alive", `to="/agents"`; "Needs you" = attention count, sublabel "approvals and questions", `to="/for-you"`; "Daemon" = `const { query, signal } = useDaemonHealth()` (hooks/useDaemonHealth.ts; `signal` is `{ controlPlaneUnhealthy: boolean; evidence }`, `query` is the React Query result for `/healthz`) mapped exactly: `query.isError` → `StatusBadge status="error" label="Offline"`; else `signal.controlPlaneUnhealthy` → `status="degraded" label="Degraded"`; else `query.isSuccess` → `status="ready" label="Healthy"`; else → `status="unknown" label="Checking"`. Put this mapping in `lib/daemon-status.ts` as `export function daemonStatus(query, signal): { status: string; label: string }` so C15 reuses it. `to="/settings/status"`.
    4. **Rigs** (`data-testid="dashboard-rigs"`): a table (`components/ui/table.tsx`) of `ps` rows: name (link to `/topology/rig/$rigId`), `StatusBadge status={lifecycleState ?? status}`, agents `activeCount/nodeCount`, "has work" `hasWorkCount`, uptime (mono). Empty → `EmptyState title="No rigs yet" description="A rig is a team of agents defined by a spec. Create one from the Library or import an existing one." action={{ label: "New rig", href: "/specs/rig" }}`.
    5. **Recent activity** (`data-testid="dashboard-activity"`): last 10 events from `useActivityFeed().events`, each one line: relative time, event `type` humanized (`rig.started` → "Rig started"), and the rig/session if present in payload (`payload.rigId`, `payload.session` when string). If none → a one-line muted "No activity yet."
@@ -1078,7 +1081,7 @@ Keep all data logic in `components/for-you/Feed.tsx` (classification, merge, dis
 
 **Do:**
 1. `src/components/AgentPropertiesPanel.tsx`: `export function AgentPropertiesPanel({ rigId, logicalId }: { rigId: string; logicalId: string })`. Uses `useNodeDetail(rigId, logicalId)` (read `NodeDetailData` in `hooks/useNodeDetail.ts` for exact field names; log them). Renders `<section data-testid="agent-properties" aria-label="Properties">` (not `<aside>`, which would break the SC-1 count), width `w-80 shrink-0 border-l bg-surface-lowest p-4`, heading "Properties". Rows (label column `w-28 text-xs text-on-surface-variant`, value column `text-sm`):
-   Status (`StatusBadge` of agent activity or session status), Runtime (mono), Rig (link to `/topology/rig/$rigId`), Pod, Session (mono, with a copy button using `copyText`, shows "Copied" for 1.5 s), Context used (`<n>%` + a thin bar; `--` if unknown), Current work (count of current qitems or "None"), Attach (mono `tmuxAttachCommand` with copy button), Latest error (only if present, `text-destructive`).
+   Status: `<StatusBadge status={data.agentActivity?.state ?? data.sessionStatus ?? "unknown"} />` (verified types: `agentActivity?: AgentActivitySummary | null` whose `state` is `"running" | "needs_input" | "idle" | "unknown"`; `sessionStatus: string | null`; all four `state` values are keys in C04's `TABLE`), Runtime (mono), Rig (link to `/topology/rig/$rigId`), Pod, Session (mono, with a copy button using `copyText`, shows "Copied" for 1.5 s), Context used (`<n>%` + a thin bar; `--` if unknown), Current work (count of current qitems or "None"), Attach (mono `tmuxAttachCommand` with copy button), Latest error (only if present, `text-destructive`).
    Loading → 6 `Skeleton` rows. Error → `EmptyState title="Couldn't load this agent" description={error.message}`.
 2. In `LiveNodeDetails.tsx`, wrap the existing body in `flex` and render the panel on the right on `lg:` and above (`hidden lg:block`). Add `PageHeader` with `title={displayAgentName(logicalId)}`, `meta` = mono `canonicalSessionName`. Keep all existing tabs and testids.
 3. `test/agent-properties-panel.test.tsx`: seeded data shows Runtime "claude-code", Context used "58%", copy button calls `navigator.clipboard.writeText` (mock it) with the attach command; error state shows "Couldn't load this agent".
@@ -1099,7 +1102,7 @@ Each sweep card applies the same recipe to a set of pages. **Recipe** (apply to 
 7. Keep every testid. Apply rule 4 for pure styling assertions and log each.
 
 **Acceptance for every sweep card:**
-- `grep -nE "uppercase|tracking-(wide|wider|widest|\[)" <each listed file>` prints only lines that you justified in NOTES.md (expected: none).
+- `grep -nE "uppercase|tracking-(wide|wider|widest|\[)|font-mono" <each listed file and each direct child component you touched>` prints only lines you justified in NOTES.md. `uppercase`/`tracking-*` matches are expected to be zero; `font-mono` matches are fine where they style machine values (ids, sessions, paths, commands, timestamps, counts) and each one is listed in NOTES.md as `file:line — machine value: <what>`.
 - Full suite 0 failed.
 - Twin screenshot of the card's main route saved to `docs/ui-redesign/screenshots/after/<route>.png`.
 
@@ -1142,7 +1145,7 @@ Card file lists:
 
 **Do:** Rewrite `docs/DESIGN.md` to describe the Clean theme. Keep the existing front sections' purpose (Essence, Design Language, Color Tokens, …) but replace their content with: the principles in section 4.1, the names table in 4.2 (labels only), the token values from C02 (light and dark), radius scale, typography rules (Inter for prose, JetBrains Mono for machine values, sentence case), status vocabulary table from C04, components inventory (PageHeader, MetricTile, StatusBadge/Dot, EmptyState, DropdownMenu, Kbd, Skeleton, Sidebar, TopBar, CommandPalette), and a short "Vellum (retired)" paragraph saying the Vellum classes remain in `globals.css` only as neutralized compatibility shims. Keep the maintenance-mode wording exactly as `docs/reference/developing.md` requires.
 
-**Acceptance:** `node scripts/check-docs-guard.mjs` (repo root) exits 0. `grep -n "tactical dossier" docs/DESIGN.md` prints nothing.
+**Acceptance:** `node scripts/check-docs-guard.mjs` (repo root) exits 0. `grep -n "tactical dossier" docs/DESIGN.md` prints nothing. `grep -c "experimental" docs/DESIGN.md` and `grep -c "maintenance mode" docs/DESIGN.md` and `grep -c "CLI is primary\|the CLI is primary" docs/DESIGN.md` each print 1 or more (the wording rule in `docs/reference/developing.md`: *experimental*, *maintenance mode*, *best-effort*, *the CLI is primary*), and `grep -niE "deprecated|end[- ]of[- ]life|will be removed" docs/DESIGN.md` prints nothing.
 
 ---
 
@@ -1166,7 +1169,7 @@ Card file lists:
    ## Screenshots
    | Before | After |
    |---|---|
-   | (6 rows. Drag the PNGs from docs/ui-redesign/screenshots/ into the PR description in the GitHub web editor; if you cannot upload, write "screenshots available on request" and list the routes) |
+   | (8 rows: `/`, `/for-you`, `/topology/rig/rig_alpha`, `/project`, `/specs`, `/settings` at 1440, plus `/` at 390 (mobile) and `/` in dark mode. Drag the PNGs from docs/ui-redesign/screenshots/ into the PR description in the GitHub web editor; if you cannot upload, write "screenshots available on request" and list the routes) |
 
    ## Tests
    - `npm run lint`: <result>

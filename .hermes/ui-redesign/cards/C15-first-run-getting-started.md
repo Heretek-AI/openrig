@@ -17,6 +17,8 @@ Before writing any code:
 2. Read the card below twice.
 3. If `docs/ui-redesign/NOTES.md` exists in your clone, read it (earlier cards' discoveries). It is git-ignored on purpose; never commit it.
 
+**Paths:** `src/…`, `test/…`, `twin/…` mean `packages/ui/src/…`, `packages/ui/test/…`, `packages/ui/twin/…`. Bare `components/…`, `hooks/…`, `lib/…` mean `packages/ui/src/components/…` etc. Run commands from `packages/ui` unless a step says "repo root" or shows a `cd`.
+
 Rules that matter most for this card:
 
 - Do only this card. If you find work that belongs to another card, write it in NOTES.md and leave it.

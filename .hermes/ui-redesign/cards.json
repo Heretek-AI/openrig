@@ -43,7 +43,8 @@
       "id": "C04",
       "title": "Status vocabulary + StatusBadge",
       "depends_on": [
-        "C01"
+        "C01",
+        "C02"
       ],
       "prompt": "cards/C04-status-vocabulary-statusbadge.md",
       "branch": "ui-redesign/c04-status-vocabulary-statusbadge",

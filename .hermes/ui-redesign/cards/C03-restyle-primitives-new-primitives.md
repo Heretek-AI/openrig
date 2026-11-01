@@ -17,6 +17,8 @@ Before writing any code:
 2. Read the card below twice.
 3. If `docs/ui-redesign/NOTES.md` exists in your clone, read it (earlier cards' discoveries). It is git-ignored on purpose; never commit it.
 
+**Paths:** `src/…`, `test/…`, `twin/…` mean `packages/ui/src/…`, `packages/ui/test/…`, `packages/ui/twin/…`. Bare `components/…`, `hooks/…`, `lib/…` mean `packages/ui/src/components/…` etc. Run commands from `packages/ui` unless a step says "repo root" or shows a `cd`.
+
 Rules that matter most for this card:
 
 - Do only this card. If you find work that belongs to another card, write it in NOTES.md and leave it.
@@ -63,7 +65,7 @@ Primitives are used widely (`ui/button` in 22 files, `ui/empty-state` in 22, `ui
    size.default "h-9 px-4", sm "h-8 px-3 text-xs", lg "h-10 px-6", icon "h-9 w-9"
    ```
    Note: `primary.foreground` is already `hsl(var(--background))` in tailwind config, which is correct in both themes.
-2. `components/ui/empty-state.tsx`: keep `EmptyStateProps` and add optional `title?: string`. Render: centered column, `py-12`, icon in a `rounded-lg bg-surface-low p-3 text-on-surface-variant` box, then `title` as `text-sm font-semibold text-on-surface` (fallback to `label`), then `description` as `text-sm text-on-surface-variant max-w-md`, then the action as a `Button` (`size="sm"`). Variant `card` wraps it in `rounded-lg border bg-surface-lowest`. Keep the `testId` and `${testId}-action` testids.
+2. `components/ui/empty-state.tsx`: keep `EmptyStateProps` and add optional `title?: string`. Render: centered column, `py-12`, icon in a `rounded-lg bg-surface-low p-3 text-on-surface-variant` box, then `title` as `text-sm font-semibold text-on-surface` (fallback to `label`), then `description` as `text-sm text-on-surface-variant max-w-md`, then the action as a `Button` (`size="sm"`): when `action.href` is set render `<Button asChild size="sm"><a href={action.href}>{action.label}</a></Button>` (keeps today's link navigation), otherwise `<Button size="sm" onClick={action.onClick}>`. Put `data-testid={testId ? testId + "-action" : undefined}` on the `<a>` or the `<button>`. Variant `card` wraps it in `rounded-lg border bg-surface-lowest`. Keep the `testId` and `${testId}-action` testids.
 3. `components/ui/section-header.tsx` and `components/ui/vellum-card.tsx`: remove `uppercase`, `tracking-*`, `font-mono` from prose text, use `rounded-lg border bg-surface-lowest shadow-sm` for cards and `text-sm font-semibold` for headers. Keep props and testids. Read `test/section-header.test.tsx` and `test/slice-16-typography-vellum.test.tsx` first: they assert some classes. If one asserts `uppercase` or `font-mono` on a header, follow rule 4 (update that one assertion, log it).
 4. New files (each exports exactly what is listed; all use `cn` from `@/lib/utils`):
    ```tsx
@@ -75,7 +77,7 @@ Primitives are used widely (`ui/button` in 22 files, `ui/empty-state` in 22, `ui
      meta?: React.ReactNode;        // a row under the title (badges, ids)
      testId?: string;               // default "page-header"
    }
-   export function PageHeader(props: PageHeaderProps): JSX.Element;
+   export function PageHeader(props: PageHeaderProps): React.JSX.Element;
    // Layout: <header data-testid> flex justify-between items-start gap-4 pb-6;
    // h1 "text-xl font-semibold text-on-surface"; description "mt-1 text-sm text-on-surface-variant".
 
@@ -84,22 +86,22 @@ Primitives are used widely (`ui/button` in 22 files, `ui/empty-state` in 22, `ui
      label: string; value: React.ReactNode; sublabel?: React.ReactNode;
      icon?: React.ComponentType<{ className?: string }>; to?: string; testId?: string;
    }
-   export function MetricTile(props: MetricTileProps): JSX.Element;
+   export function MetricTile(props: MetricTileProps): React.JSX.Element;
    // value "text-3xl font-semibold tabular-nums"; label "text-sm font-medium"; sublabel "text-xs text-on-surface-variant".
    // If `to` is set, wrap in TanStack <Link to={to}> with hover:bg-surface-low.
 
    // components/ui/dropdown-menu.tsx  — re-export Radix with styled Content/Item:
    export const DropdownMenu = RadixDropdown.Root;
    export const DropdownMenuTrigger = RadixDropdown.Trigger;
-   export function DropdownMenuContent(props: RadixDropdown.DropdownMenuContentProps): JSX.Element; // Portal + "z-50 min-w-[10rem] rounded-md border bg-popover p-1 shadow-md", sideOffset default 4
-   export function DropdownMenuItem(props: RadixDropdown.DropdownMenuItemProps & { destructive?: boolean }): JSX.Element; // "flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-surface-low", destructive adds "text-destructive"
+   export function DropdownMenuContent(props: RadixDropdown.DropdownMenuContentProps): React.JSX.Element; // Portal + "z-50 min-w-[10rem] rounded-md border bg-popover p-1 shadow-md", sideOffset default 4
+   export function DropdownMenuItem(props: RadixDropdown.DropdownMenuItemProps & { destructive?: boolean }): React.JSX.Element; // "flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-surface-low", destructive adds "text-destructive"
    export const DropdownMenuSeparator: React.FC; // "my-1 h-px bg-outline-variant"
 
    // components/ui/kbd.tsx
-   export function Kbd({ children }: { children: React.ReactNode }): JSX.Element; // "rounded border bg-surface-low px-1.5 font-mono text-[11px] text-on-surface-variant"
+   export function Kbd({ children }: { children: React.ReactNode }): React.JSX.Element; // "rounded border bg-surface-low px-1.5 font-mono text-[11px] text-on-surface-variant"
 
    // components/ui/skeleton.tsx
-   export function Skeleton({ className }: { className?: string }): JSX.Element; // "animate-pulse rounded-md bg-surface-mid"
+   export function Skeleton({ className }: { className?: string }): React.JSX.Element; // "animate-pulse rounded-md bg-surface-mid"
    ```
 5. Add one test file `test/ui-primitives-v2.test.tsx` with at least: PageHeader renders title/description/actions; MetricTile renders value and links when `to` is set (use `createAppTestRouter` from `test/helpers/test-router.tsx` for the Link case); DropdownMenu opens via `keyDown Enter` and a `destructive` item has class `text-destructive`.
 

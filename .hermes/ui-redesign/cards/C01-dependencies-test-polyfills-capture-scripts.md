@@ -17,6 +17,8 @@ Before writing any code:
 2. Read the card below twice.
 3. If `docs/ui-redesign/NOTES.md` exists in your clone, read it (earlier cards' discoveries). It is git-ignored on purpose; never commit it.
 
+**Paths:** `src/…`, `test/…`, `twin/…` mean `packages/ui/src/…`, `packages/ui/test/…`, `packages/ui/twin/…`. Bare `components/…`, `hooks/…`, `lib/…` mean `packages/ui/src/components/…` etc. Run commands from `packages/ui` unless a step says "repo root" or shows a `cd`.
+
 Rules that matter most for this card:
 
 - Do only this card. If you find work that belongs to another card, write it in NOTES.md and leave it.
@@ -160,6 +162,7 @@ C01: Dependencies, test polyfills, capture scripts
      const mode = await p.getAttribute("[data-testid='content-area']", "data-explorer-mode").catch(() => null);
      const out = { width, mode, rail, explorer, content, errors: [] };
      if (!rail) out.errors.push("app-rail not visible");
+     if (!content) out.errors.push("content-area not visible");
      if (rail && explorer && Math.abs(explorer.left - rail.right) > 1) out.errors.push(`explorer.left ${explorer.left} != rail.right ${rail.right}`);
      if (mode === "opaque" && explorer && content && content.left < explorer.right) out.errors.push(`content.left ${content.left} < explorer.right ${explorer.right}`);
      if (rail && content && content.left < rail.right) out.errors.push(`content.left ${content.left} < rail.right ${rail.right}`);

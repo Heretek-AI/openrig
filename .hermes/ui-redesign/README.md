@@ -32,16 +32,16 @@ This folder is a ready-to-run work package for **hermes** (or any orchestrator t
 Create one kanban card per entry in `cards.json`, in this order, with its `depends_on` as blockers:
 
 ```
-C00 → C01 → { C02 → C03 , C04 , C05 } → C06 → { C07 , C08 , C09 , C16 }
+C00 → C01 → { C02 → { C03 , C04 } , C05 } → C06 → { C07 , C08 , C09 , C16 }
 C07 → { C10 , C11 , C13 , C14a , C14b , C14c , C14d , C14e } ; C07 + C09 → C12 ; C10 → C15
 C10…C16 → C17 → C18
 ```
 
-A card is ready when every card in `depends_on` has its PR **merged into `ui-redesign`**. Most parallelism is available after C07: up to 9 cards can run at once.
+A card is ready when every card in `depends_on` has its PR **merged into `ui-redesign`**. **Exception: C00 has no PR.** C00 is done when the `ui-redesign` branch exists on `origin` (`git ls-remote --heads origin ui-redesign` prints one line) and its baseline acceptance checks are reported; then C01 is ready. Every later dependency uses the merged-PR rule. Most parallelism is available after C07: up to 9 cards can run at once.
 
 ## 3. Dispatching a card
 
-1. Pick a ready card. Give the coding agent the text below the line in `cards/<id>-*.md`. It already names the branch, the PR base and the PR body format.
+1. Pick a ready card. Give the coding agent the text below the line in `cards/<id>-*.md`. Paths in the prompts follow the brief's path convention (section 2, rule 13): `src/`, `test/`, `twin/` are under `packages/ui/`; bare `components/`, `hooks/`, `lib/` are under `packages/ui/src/`. It already names the branch, the PR base and the PR body format.
 2. Each agent works in its own clone or worktree, on `ui-redesign/<id>-<slug>` cut from the latest `origin/ui-redesign`.
 3. **Notes travel through PRs.** `docs/ui-redesign/NOTES.md` is git-ignored by repo policy (CI's docs guard rejects tracked files under `docs/` except `as-built/`, `reference/`, `releases/` and `docs/DESIGN.md`). Each card's PR body ends with "Notes for later cards". Before dispatching a card, paste the "Notes for later cards" sections of its merged dependencies into the agent's task, below the card prompt.
 4. Review gate before merging a card PR into `ui-redesign`:

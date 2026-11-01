@@ -17,6 +17,8 @@ Before writing any code:
 2. Read the card below twice.
 3. If `docs/ui-redesign/NOTES.md` exists in your clone, read it (earlier cards' discoveries). It is git-ignored on purpose; never commit it.
 
+**Paths:** `src/…`, `test/…`, `twin/…` mean `packages/ui/src/…`, `packages/ui/test/…`, `packages/ui/twin/…`. Bare `components/…`, `hooks/…`, `lib/…` mean `packages/ui/src/components/…` etc. Run commands from `packages/ui` unless a step says "repo root" or shows a `cd`.
+
 Rules that matter most for this card:
 
 - Do only this card. If you find work that belongs to another card, write it in NOTES.md and leave it.
@@ -69,11 +71,11 @@ C07: Top bar + breadcrumbs
    | `/project` | `[Projects]` ; `/project/mission/:id` → `[Projects→/project, Mission :id]` ; `/project/slice/:id` → `[Projects→/project, Slice :id]` |
    | `/specs` | `[Library]` ; `/specs/skills` → `[Library→/specs, Skills]` ; `/specs/skills/:t` → `[Library, Skills→/specs/skills, :t]` ; `/specs/plugins` → `[Library→/specs, Plugins]` ; `/plugins/:id` → `[Library→/specs, Plugins→/specs/plugins, :id]` ; any other `/specs/...` → `[Library→/specs, <last segment>]` |
    | `/files` | `[Files]` |
-   | `/settings` | `[Settings]` ; `/settings/policies` → `[Settings→/settings, Policies]` ; `/log` → `Log` ; `/status` → `Status` |
+   | `/settings` | `[Settings]` ; `/settings/policies` → `[Settings→/settings, Policies]` ; `/settings/log` → `[Settings→/settings, Log]` ; `/settings/status` → `[Settings→/settings, Status]` |
    | anything else | `[<last segment, decoded>]` |
    Decode every segment with `decodeURIComponent` inside try/catch.
 2. `src/components/shell/TopBar.tsx`: replaces the contents of the existing `<header data-testid="app-topbar">` (keep that testid and the mobile hamburger button and its testid/behavior). Left: on mobile the hamburger, then on all sizes the breadcrumbs as `<div role="navigation" aria-label="Breadcrumb" data-testid="breadcrumbs">`. Do not use a `<nav>` element: it would be a third `nav` in the SC-1 count. `role="navigation"` on a `div` is fine, because that test queries the tag names `nav, aside` only. Crumbs separated by `ChevronRight h-3.5 w-3.5 text-on-surface-variant`; linked crumbs `text-on-surface-variant hover:text-on-surface`, last crumb `text-on-surface font-medium truncate`. Right: `HostIndicator`, then `ThemeSelector`. Height `h-12`, `border-b bg-background`. Brand: show a small "OpenRig" wordmark (`text-sm font-semibold`) at the far left **only on mobile**; on desktop, put the wordmark in the sidebar header row (C06 header) instead. Keep the brand link `to="/"` and whatever testid the existing brand link has (find it in AppShell; the app-shell test "brand link visible at desktop and links to /" must keep passing: if it requires the brand inside the top bar at desktop, keep a desktop brand in the top bar and log it).
 3. Rig names for crumbs come from `useRigSummary()` (`names.rigName = (id) => data?.find(r => r.id === id)?.name`).
-4. `test/breadcrumbs.test.ts`: one case per table row (≥20 cases), plus a percent-encoded logical id (`/topology/seat/rig_alpha/lead%2Ecoordinator` decodes).
+4. `test/breadcrumbs.test.ts`: one case per table row (≥20 cases, including `/settings/log` and `/settings/status`), plus a percent-encoded logical id (`/topology/seat/rig_alpha/lead%2Ecoordinator` decodes).
 
 **Acceptance:** breadcrumbs test passes; app-shell test passes (log any changed assertion); full suite 0 failed; twin screenshot of `/topology/rig/rig_alpha` shows "Rigs › acme-build" in the top bar.

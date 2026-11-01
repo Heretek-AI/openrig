@@ -17,6 +17,8 @@ Before writing any code:
 2. Read the card below twice.
 3. If `docs/ui-redesign/NOTES.md` exists in your clone, read it (earlier cards' discoveries). It is git-ignored on purpose; never commit it.
 
+**Paths:** `src/…`, `test/…`, `twin/…` mean `packages/ui/src/…`, `packages/ui/test/…`, `packages/ui/twin/…`. Bare `components/…`, `hooks/…`, `lib/…` mean `packages/ui/src/components/…` etc. Run commands from `packages/ui` unless a step says "repo root" or shows a `cd`.
+
 Rules that matter most for this card:
 
 - Do only this card. If you find work that belongs to another card, write it in NOTES.md and leave it.
@@ -49,4 +51,4 @@ C17: DESIGN.md rewrite
 
 **Do:** Rewrite `docs/DESIGN.md` to describe the Clean theme. Keep the existing front sections' purpose (Essence, Design Language, Color Tokens, …) but replace their content with: the principles in section 4.1, the names table in 4.2 (labels only), the token values from C02 (light and dark), radius scale, typography rules (Inter for prose, JetBrains Mono for machine values, sentence case), status vocabulary table from C04, components inventory (PageHeader, MetricTile, StatusBadge/Dot, EmptyState, DropdownMenu, Kbd, Skeleton, Sidebar, TopBar, CommandPalette), and a short "Vellum (retired)" paragraph saying the Vellum classes remain in `globals.css` only as neutralized compatibility shims. Keep the maintenance-mode wording exactly as `docs/reference/developing.md` requires.
 
-**Acceptance:** `node scripts/check-docs-guard.mjs` (repo root) exits 0. `grep -n "tactical dossier" docs/DESIGN.md` prints nothing.
+**Acceptance:** `node scripts/check-docs-guard.mjs` (repo root) exits 0. `grep -n "tactical dossier" docs/DESIGN.md` prints nothing. `grep -c "experimental" docs/DESIGN.md` and `grep -c "maintenance mode" docs/DESIGN.md` and `grep -c "CLI is primary\|the CLI is primary" docs/DESIGN.md` each print 1 or more (the wording rule in `docs/reference/developing.md`: *experimental*, *maintenance mode*, *best-effort*, *the CLI is primary*), and `grep -niE "deprecated|end[- ]of[- ]life|will be removed" docs/DESIGN.md` prints nothing.

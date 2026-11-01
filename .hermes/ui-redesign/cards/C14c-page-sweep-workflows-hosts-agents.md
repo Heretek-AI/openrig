@@ -17,6 +17,8 @@ Before writing any code:
 2. Read the card below twice.
 3. If `docs/ui-redesign/NOTES.md` exists in your clone, read it (earlier cards' discoveries). It is git-ignored on purpose; never commit it.
 
+**Paths:** `src/…`, `test/…`, `twin/…` mean `packages/ui/src/…`, `packages/ui/test/…`, `packages/ui/twin/…`. Bare `components/…`, `hooks/…`, `lib/…` mean `packages/ui/src/components/…` etc. Run commands from `packages/ui` unless a step says "repo root" or shows a `cd`.
+
 Rules that matter most for this card:
 
 - Do only this card. If you find work that belongs to another card, write it in NOTES.md and leave it.
@@ -57,7 +59,7 @@ Each sweep card applies the same recipe to a set of pages. **Recipe** (apply to 
 7. Keep every testid. Apply rule 4 for pure styling assertions and log each.
 
 **Acceptance for every sweep card:**
-- `grep -nE "uppercase|tracking-(wide|wider|widest|\[)" <each listed file>` prints only lines that you justified in NOTES.md (expected: none).
+- `grep -nE "uppercase|tracking-(wide|wider|widest|\[)|font-mono" <each listed file and each direct child component you touched>` prints only lines you justified in NOTES.md. `uppercase`/`tracking-*` matches are expected to be zero; `font-mono` matches are fine where they style machine values (ids, sessions, paths, commands, timestamps, counts) and each one is listed in NOTES.md as `file:line — machine value: <what>`.
 - Full suite 0 failed.
 - Twin screenshot of the card's main route saved to `docs/ui-redesign/screenshots/after/<route>.png`.
 

@@ -17,6 +17,8 @@ Before writing any code:
 2. Read the card below twice.
 3. If `docs/ui-redesign/NOTES.md` exists in your clone, read it (earlier cards' discoveries). It is git-ignored on purpose; never commit it.
 
+**Paths:** `src/…`, `test/…`, `twin/…` mean `packages/ui/src/…`, `packages/ui/test/…`, `packages/ui/twin/…`. Bare `components/…`, `hooks/…`, `lib/…` mean `packages/ui/src/components/…` etc. Run commands from `packages/ui` unless a step says "repo root" or shows a `cd`.
+
 Rules that matter most for this card:
 
 - Do only this card. If you find work that belongs to another card, write it in NOTES.md and leave it.
@@ -156,8 +158,9 @@ C02: Clean theme tokens + replace the 3 radius/token tests
      const config = readFileSync(resolve(__dirname, "../tailwind.config.ts"), "utf-8");
      const radiusMatch = config.match(/borderRadius:\s*\{([^}]+)\}/);
      expect(radiusMatch).not.toBeNull();
-     const pairs = [...radiusMatch![1]!.matchAll(/(\w+):\s*"([^"]+)"/g)];
-     expect(pairs.length).toBeGreaterThanOrEqual(6);
+     // Matches bare keys (sm, DEFAULT) and quoted keys ("2xl", "3xl").
+     const pairs = [...radiusMatch![1]!.matchAll(/"?(\w+)"?:\s*"([^"]+)"/g)];
+     expect(pairs.map(([, k]) => k).sort()).toEqual(["2xl", "3xl", "DEFAULT", "full", "lg", "md", "none", "sm", "xl"]);
      for (const [, key, value] of pairs) {
        if (key === "full") expect(value).toBe("9999px");
        else if (key === "none") expect(value).toBe("0px");
@@ -166,7 +169,7 @@ C02: Clean theme tokens + replace the 3 radius/token tests
      const css = readFileSync(resolve(__dirname, "../src/globals.css"), "utf-8");
      expect(css).toMatch(/--radius:\s*0\.5rem;/);
      ```
-   - In `test/design-compliance.test.tsx`, in `it("no non-zero border-radius in any component", …)`: rename it to `it("border radius comes only from the --radius token scale", …)`. Replace the **config loop** (the `for (const [, key, value] of pairs)` block that expects `"0px"`) with the same three-branch loop as above. **Keep** the second half that scans component sources for inline `borderRadius: <number>` and expects 0. Do not touch the other tests in that file.
+   - In `test/design-compliance.test.tsx`, in `it("no non-zero border-radius in any component", …)`: rename it to `it("border radius comes only from the --radius token scale", …)`. Replace the `const pairs = …matchAll(…)` line with the quoted-key-aware regex above (`/"?(\w+)"?:\s*"([^"]+)"/g`), and replace the **config loop** (the `for (const [, key, value] of pairs)` block that expects `"0px"`) with the same three-branch loop as above. **Keep** the second half that scans component sources for inline `borderRadius: <number>` and expects 0. Do not touch the other tests in that file.
 4. Do **not** delete the Vellum `:root` / `.dark` blocks or the `.reg-*` / `.vellum` rules above. Other tests read those CSS sources (`test/registration-marks.test.tsx` asserts the `.reg-*` rules exist). The override block neutralizes them.
 
 **Acceptance:**
