@@ -1,0 +1,268 @@
+{
+  "integration_branch": "ui-redesign",
+  "cards": [
+    {
+      "id": "C00",
+      "title": "Baseline, branch, notes, before-screenshots",
+      "depends_on": [],
+      "prompt": "cards/C00-baseline-branch-notes-before-screenshots.md",
+      "branch": "ui-redesign",
+      "pr_base": "(none, push ui-redesign)"
+    },
+    {
+      "id": "C01",
+      "title": "Dependencies, test polyfills, capture scripts",
+      "depends_on": [
+        "C00"
+      ],
+      "prompt": "cards/C01-dependencies-test-polyfills-capture-scripts.md",
+      "branch": "ui-redesign/c01-dependencies-test-polyfills-capture-scripts",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C02",
+      "title": "Clean theme tokens + replace the 3 radius/token tests",
+      "depends_on": [
+        "C01"
+      ],
+      "prompt": "cards/C02-clean-theme-tokens-replace-the.md",
+      "branch": "ui-redesign/c02-clean-theme-tokens-replace-the",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C03",
+      "title": "Restyle primitives + new primitives",
+      "depends_on": [
+        "C02"
+      ],
+      "prompt": "cards/C03-restyle-primitives-new-primitives.md",
+      "branch": "ui-redesign/c03-restyle-primitives-new-primitives",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C04",
+      "title": "Status vocabulary + StatusBadge",
+      "depends_on": [
+        "C01",
+        "C02"
+      ],
+      "prompt": "cards/C04-status-vocabulary-statusbadge.md",
+      "branch": "ui-redesign/c04-status-vocabulary-statusbadge",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C05",
+      "title": "Nav model + chat-target helpers",
+      "depends_on": [
+        "C01"
+      ],
+      "prompt": "cards/C05-nav-model-chat-target-helpers.md",
+      "branch": "ui-redesign/c05-nav-model-chat-target-helpers",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C06",
+      "title": "Sidebar shell (replaces the rail)",
+      "depends_on": [
+        "C03",
+        "C04",
+        "C05"
+      ],
+      "prompt": "cards/C06-sidebar-shell-replaces-the-rail.md",
+      "branch": "ui-redesign/c06-sidebar-shell-replaces-the-rail",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C07",
+      "title": "Top bar + breadcrumbs",
+      "depends_on": [
+        "C06"
+      ],
+      "prompt": "cards/C07-top-bar-breadcrumbs.md",
+      "branch": "ui-redesign/c07-top-bar-breadcrumbs",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C08",
+      "title": "Command palette (\u2318K)",
+      "depends_on": [
+        "C06"
+      ],
+      "prompt": "cards/C08-command-palette-k.md",
+      "branch": "ui-redesign/c08-command-palette-k",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C09",
+      "title": "Toasts for rig actions",
+      "depends_on": [
+        "C06"
+      ],
+      "prompt": "cards/C09-toasts-for-rig-actions.md",
+      "branch": "ui-redesign/c09-toasts-for-rig-actions",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C10",
+      "title": "Dashboard v2 + useAllAgents",
+      "depends_on": [
+        "C07"
+      ],
+      "prompt": "cards/C10-dashboard-v2-useallagents.md",
+      "branch": "ui-redesign/c10-dashboard-v2-useallagents",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C11",
+      "title": "Inbox v2 (restyle For You)",
+      "depends_on": [
+        "C07"
+      ],
+      "prompt": "cards/C11-inbox-v2-restyle-for-you.md",
+      "branch": "ui-redesign/c11-inbox-v2-restyle-for-you",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C12",
+      "title": "Rigs pages (header and actions menu)",
+      "depends_on": [
+        "C07",
+        "C09"
+      ],
+      "prompt": "cards/C12-rigs-pages-header-and-actions.md",
+      "branch": "ui-redesign/c12-rigs-pages-header-and-actions",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C13",
+      "title": "Agent page Properties panel",
+      "depends_on": [
+        "C07"
+      ],
+      "prompt": "cards/C13-agent-page-properties-panel.md",
+      "branch": "ui-redesign/c13-agent-page-properties-panel",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C14a",
+      "title": "Page sweep, Projects",
+      "depends_on": [
+        "C07"
+      ],
+      "prompt": "cards/C14a-page-sweep-projects.md",
+      "branch": "ui-redesign/c14a-page-sweep-projects",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C14b",
+      "title": "Page sweep, Library",
+      "depends_on": [
+        "C07"
+      ],
+      "prompt": "cards/C14b-page-sweep-library.md",
+      "branch": "ui-redesign/c14b-page-sweep-library",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C14c",
+      "title": "Page sweep, Workflows, Hosts, Agents",
+      "depends_on": [
+        "C07"
+      ],
+      "prompt": "cards/C14c-page-sweep-workflows-hosts-agents.md",
+      "branch": "ui-redesign/c14c-page-sweep-workflows-hosts-agents",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C14d",
+      "title": "Page sweep, Settings",
+      "depends_on": [
+        "C07"
+      ],
+      "prompt": "cards/C14d-page-sweep-settings.md",
+      "branch": "ui-redesign/c14d-page-sweep-settings",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C14e",
+      "title": "Page sweep, Flows",
+      "depends_on": [
+        "C07"
+      ],
+      "prompt": "cards/C14e-page-sweep-flows.md",
+      "branch": "ui-redesign/c14e-page-sweep-flows",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C15",
+      "title": "First-run \"Getting started\"",
+      "depends_on": [
+        "C10"
+      ],
+      "prompt": "cards/C15-first-run-getting-started.md",
+      "branch": "ui-redesign/c15-first-run-getting-started",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C16",
+      "title": "Mobile bottom nav",
+      "depends_on": [
+        "C06"
+      ],
+      "prompt": "cards/C16-mobile-bottom-nav.md",
+      "branch": "ui-redesign/c16-mobile-bottom-nav",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C17",
+      "title": "DESIGN.md rewrite",
+      "depends_on": [
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14a",
+        "C14b",
+        "C14c",
+        "C14d",
+        "C14e",
+        "C15",
+        "C16"
+      ],
+      "prompt": "cards/C17-design-md-rewrite.md",
+      "branch": "ui-redesign/c17-design-md-rewrite",
+      "pr_base": "ui-redesign"
+    },
+    {
+      "id": "C18",
+      "title": "Final audit, after-screenshots, PR to main",
+      "depends_on": [
+        "C00",
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14a",
+        "C14b",
+        "C14c",
+        "C14d",
+        "C14e",
+        "C15",
+        "C16",
+        "C17"
+      ],
+      "prompt": "cards/C18-final-audit-after-screenshots-pr.md",
+      "branch": "ui-redesign",
+      "pr_base": "main"
+    }
+  ]
+}
