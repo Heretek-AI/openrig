@@ -56,7 +56,7 @@ import { useActivityFeed } from "../hooks/useActivityFeed.js";
 import { useClearPlacementOnHostSwitch } from "../hooks/useHosts.js";
 import { useGlobalEvents } from "../hooks/useGlobalEvents.js";
 import { cn } from "../lib/utils.js";
-import { parseSessionName } from "../lib/session-name.js";
+import { readSettingString, resolveChatTo } from "../lib/chat-targets.js";
 import { HostIndicator } from "./HostIndicator.js";
 
 // =====================================================================
@@ -204,29 +204,7 @@ const RAIL_ICONS: RailIconSpec[] = [
   },
 ];
 
-// V1 Phase 4 P4-4 helpers — config-driven Advisor / Operator click resolution.
-
-function readSettingString(
-  data: { settings?: Record<string, { value?: unknown }> } | undefined,
-  key: string,
-): string {
-  if (!data || !data.settings) return "";
-  const v = data.settings[key]?.value;
-  return typeof v === "string" ? v : "";
-}
-
-/** Map a ConfigStore session-string ("logicalId@rigId") to a navigation
- *  target. When configured: `/topology/seat/$rigId/$logicalId`. When
- *  unset: `/settings#agents-{role}-session`. Per universal-shell.md L80
- *  (one-click navigation; not popup-then-CTA two-click). */
-function resolveChatTo(session: string, role: "advisor" | "operator"): string {
-  if (!session) return `/settings#agents-${role}-session`;
-  // OPR.0.4.6.MH1 FR-8: the shared parse contract; non-canonical
-  // (malformed/legacy) falls back to /settings.
-  const parsed = parseSessionName(session);
-  if (parsed.kind !== "canonical") return `/settings#agents-${role}-session`;
-  return `/topology/seat/${encodeURIComponent(parsed.rig)}/${encodeURIComponent(parsed.member)}`;
-}
+// V1 Phase 4 P4-4 helpers live in lib/chat-targets.ts (moved verbatim in C05).
 
 // =====================================================================
 // Path → Explorer surface mapping
