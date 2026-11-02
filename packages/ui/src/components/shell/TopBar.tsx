@@ -25,7 +25,7 @@ export function TopBar() {
         <Link
           to="/"
           data-testid="brand-home-link"
-          className="text-sm font-semibold text-on-surface lg:hidden"
+          className="shrink-0 text-sm font-semibold text-on-surface lg:hidden"
         >
           OpenRig
         </Link>
@@ -65,7 +65,7 @@ export function TopBar() {
           })}
         </div>
       </div>
-      <div data-testid="topbar-right-slot" className="flex items-center gap-3">
+      <div data-testid="topbar-right-slot" className="flex shrink-0 items-center gap-3">
         <HostIndicator />
         <ThemeSelector />
       </div>

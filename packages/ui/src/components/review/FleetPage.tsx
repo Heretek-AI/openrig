@@ -169,7 +169,7 @@ export function FleetPage() {
   const okHosts = data.hosts.filter((h) => h.status.status === "ok").length;
 
   return (
-    <div data-testid="fleet-page" className="mx-auto max-w-4xl space-y-5 p-4 text-sm">
+    <div data-testid="fleet-page" className="mx-auto w-full max-w-4xl space-y-5 p-4 text-sm">
       <PageHeader
         title="Hosts"
         description="Every factory in one glance — what needs you, per-host status, and settled work. Open a host to work there."

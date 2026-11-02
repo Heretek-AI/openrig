@@ -87,7 +87,7 @@ export function RigAgentsPage() {
   }
 
   return (
-    <div data-testid="rig-agents-page" className="mx-auto max-w-4xl space-y-5 p-4 text-sm">
+    <div data-testid="rig-agents-page" className="mx-auto w-full max-w-4xl space-y-5 p-4 text-sm">
       {/* MH-5: the fleet altitude's ambient band above the rig altitude. */}
       <FleetBand />
       <PageHeader

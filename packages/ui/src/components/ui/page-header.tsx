@@ -17,7 +17,7 @@ export function PageHeader({
   testId = "page-header",
 }: PageHeaderProps): React.JSX.Element {
   return (
-    <header data-testid={testId} className={cn("flex justify-between items-start gap-4 pb-6")}>
+    <header data-testid={testId} className={cn("flex flex-wrap justify-between items-start gap-x-4 gap-y-3 pb-6")}>
       <div className="min-w-0">
         <h1 className="text-xl font-semibold text-on-surface">{title}</h1>
         {meta ? <div className="mt-1 flex flex-wrap items-center gap-2">{meta}</div> : null}
@@ -25,7 +25,7 @@ export function PageHeader({
           <p className="mt-1 text-sm text-on-surface-variant">{description}</p>
         ) : null}
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
     </header>
   );
 }

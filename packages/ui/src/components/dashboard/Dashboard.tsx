@@ -191,7 +191,7 @@ export function Dashboard() {
   const attention = useAttentionItems(50, anyRemoteEnabled);
   const attentionCount = attention.data?.items.length ?? 0;
   return (
-    <div className="mx-auto max-w-6xl px-6 py-6">
+    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
       <PageHeader
         title="Dashboard"
         description="What's running, and what needs you."
