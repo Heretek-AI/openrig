@@ -22,6 +22,7 @@ import { useFeedSubscriptions } from "../../hooks/useFeedSubscriptions.js";
 import { useDaemonHealth } from "../../hooks/useDaemonHealth.js";
 import { useActivityFeed } from "../../hooks/useActivityFeed.js";
 import { VerbActions } from "../mission-control/components/VerbActions.js";
+import { GettingStarted } from "./GettingStarted.js";
 import { KernelStatusCard } from "../KernelStatusCard.js";
 import { HostConfigCard } from "./HostConfigCard.js";
 
@@ -206,6 +207,7 @@ export function Dashboard() {
         }
       />
       <div className="flex flex-col gap-8">
+        <GettingStarted />
         <NeedsYou />
         <MetricTiles attentionCount={attentionCount} />
         <RigsTable />
