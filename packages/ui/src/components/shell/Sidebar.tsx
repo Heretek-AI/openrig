@@ -99,8 +99,17 @@ export function Sidebar({
         isMobileTray && "w-full",
       )}
     >
-      {/* Header row: collapse toggle on desktop only. */}
-      <div className={cn("hidden lg:flex items-center", effectiveCollapsed ? "justify-center px-0 py-2" : "justify-end px-2 py-2")}>
+      {/* Header row: desktop wordmark (C07) + collapse toggle on desktop only. */}
+      <div className={cn("hidden lg:flex items-center", effectiveCollapsed ? "justify-center px-0 py-2" : "justify-between px-3 py-2")}>
+        {effectiveCollapsed ? null : (
+          <Link
+            to="/"
+            data-testid="brand-home-link"
+            className="text-sm font-semibold text-on-surface"
+          >
+            OpenRig
+          </Link>
+        )}
         <button
           type="button"
           data-testid="sidebar-toggle"
