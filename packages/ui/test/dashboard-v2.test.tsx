@@ -59,22 +59,26 @@ const ATTENTION = {
   hosts: [],
 };
 
+function seed(qc: QueryClient, ps: unknown, attention: unknown) {
+  const entries: Array<[unknown[], unknown]> = [
+    [["hosts"], { ownName: "localhost", selected: "local", hosts: [] }],
+    [["ps", "local"], ps],
+    [["attention-items", 50, false], attention],
+    [["settings", "all"], { settings: {} }],
+    [["kernel", "status"], { state: "skipped" }],
+    [["daemon", "health"], { status: "ok" }],
+  ];
+  for (const [key, value] of entries) {
+    qc.setQueryData(key, value);
+  }
+}
+
 function seedFull(qc: QueryClient) {
-  qc.setQueryData(["hosts"], { ownName: "localhost", selected: "local", hosts: [] });
-  qc.setQueryData(["ps", "local"], PS);
-  qc.setQueryData(["attention-items", 50, false], ATTENTION);
-  qc.setQueryData(["settings", "all"], { settings: {} });
-  qc.setQueryData(["kernel", "status"], { state: "skipped" });
-  qc.setQueryData(["daemon", "health"], { status: "ok" });
+  seed(qc, PS, ATTENTION);
 }
 
 function seedEmpty(qc: QueryClient) {
-  qc.setQueryData(["hosts"], { ownName: "localhost", selected: "local", hosts: [] });
-  qc.setQueryData(["ps", "local"], []);
-  qc.setQueryData(["attention-items", 50, false], { items: [], hosts: [] });
-  qc.setQueryData(["settings", "all"], { settings: {} });
-  qc.setQueryData(["kernel", "status"], { state: "skipped" });
-  qc.setQueryData(["daemon", "health"], { status: "ok" });
+  seed(qc, [], { items: [], hosts: [] });
 }
 
 vi.mock("../src/components/mission-control/components/VerbActions.js", () => ({
