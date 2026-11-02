@@ -12,6 +12,7 @@ import {
   psEntries,
   specLibrary,
   nodeInventoryByRig,
+  attentionItems,
   rigGraphByRig,
   nodeDetailByKey,
   sessionPreviewByName,
@@ -25,6 +26,10 @@ export function seedTwinCache(qc: QueryClient): void {
   // Dashboard + AppShell core surface.
   qc.setQueryData(["rigs", "summary"], rigSummary);
   qc.setQueryData(["ps"], psEntries);
+  // C10 Dashboard v2: usePsEntries keys by selected host (["ps", hostId]);
+  // the base key above stays for prefix-invalidations, the host-suffixed
+  // keys below are what the Dashboard tiles + Rigs table actually read.
+  qc.setQueryData(["ps", "local"], psEntries);
   qc.setQueryData(["spec-library", "all"], specLibrary);
   // Spec Library filtered views (Library surface + node-details "agent" lens).
   qc.setQueryData(["spec-library", "agent"], specLibrary.filter((s) => s.kind === "agent"));
@@ -32,6 +37,8 @@ export function seedTwinCache(qc: QueryClient): void {
   // Per-rig topology surfaces, keyed by rig id.
   for (const rig of rigSummary) {
     qc.setQueryData(["rig", rig.id, "nodes"], nodeInventoryByRig[rig.id] ?? []);
+    // C10: useNodeInventory / useAllAgents key ["rig", rigId, "nodes", hostId].
+    qc.setQueryData(["rig", rig.id, "nodes", "local"], nodeInventoryByRig[rig.id] ?? []);
     // Hard surface 1 — topology GRAPH (xyflow nodes/edges).
     qc.setQueryData(["rig", rig.id, "graph"], rigGraphByRig[rig.id] ?? { nodes: [], edges: [] });
   }
@@ -47,4 +54,11 @@ export function seedTwinCache(qc: QueryClient): void {
       qc.setQueryData(["session-preview", preview.sessionName, n], { ...preview, lines: n });
     }
   }
+
+  // C10 Dashboard v2 — the keys the Dashboard body actually reads.
+  qc.setQueryData(["hosts"], { ownName: "localhost", selected: "local", hosts: [] });
+  qc.setQueryData(["attention-items", 50, false], attentionItems);
+  qc.setQueryData(["daemon", "health"], { status: "ok" });
+  qc.setQueryData(["kernel", "status"], { error: "kernel_boot_tracker_unavailable", message: "twin" });
+  qc.setQueryData(["settings", "all"], { settings: {} });
 }
