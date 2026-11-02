@@ -60,5 +60,26 @@ export function seedTwinCache(qc: QueryClient): void {
   qc.setQueryData(["attention-items", 50, false], attentionItems);
   qc.setQueryData(["daemon", "health"], { status: "ok" });
   qc.setQueryData(["kernel", "status"], { error: "kernel_boot_tracker_unavailable", message: "twin" });
-  qc.setQueryData(["settings", "all"], { settings: {} });
+  // C18: seed real settings so SettingsTab's SettingsRow never reads
+  // `.value` off undefined (twin cache shadows the fetch stub, staleTime:0
+  // still serves initialData first). Mirrors twin/fetch-stub.ts /api/config.
+  qc.setQueryData(["settings", "all"], {
+    settings: {
+      "daemon.port": { value: 7433, source: "default", defaultValue: 7433 },
+      "daemon.host": { value: "127.0.0.1", source: "default", defaultValue: "127.0.0.1" },
+      "db.path": { value: "~/.openrig/openrig.db", source: "default", defaultValue: "~/.openrig/openrig.db" },
+      "transcripts.enabled": { value: true, source: "default", defaultValue: true },
+      "transcripts.path": { value: "~/.openrig/transcripts", source: "default", defaultValue: "~/.openrig/transcripts" },
+      "workspace.root": { value: "/Users/x/code/workspace", source: "file", defaultValue: "" },
+      "workspace.slices_root": { value: "/Users/x/code/workspace/slices", source: "default", defaultValue: "" },
+      "workspace.steering_path": { value: "/Users/x/code/workspace/steering", source: "default", defaultValue: "" },
+      "workspace.specs_root": { value: "/Users/x/code/workspace/specs", source: "default", defaultValue: "" },
+      "workspace.projects_root": { value: "/Users/x/code/workspace/projects", source: "default", defaultValue: "" },
+      "workspace.catalog_path": { value: "/Users/x/code/workspace/catalog.json", source: "default", defaultValue: "" },
+      "files.allowlist": { value: "workspace:/Users/x/code/workspace", source: "default", defaultValue: "" },
+      "progress.scan_roots": { value: "workspace:/Users/x/code/workspace", source: "env", defaultValue: "" },
+      "ui.preview.default_lines": { value: 100, source: "default", defaultValue: 100 },
+      "ui.preview.refresh_interval_seconds": { value: 3, source: "default", defaultValue: 3 },
+    },
+  });
 }
