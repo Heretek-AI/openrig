@@ -319,7 +319,7 @@ function TopologyActionsCell({ row }: { row: AgentRow }) {
         data-remote-readonly="true"
         className="text-[11px] text-on-surface-variant"
       >
-        read-only
+        Read-only
       </span>
     );
   }

@@ -117,7 +117,7 @@ function UnresolvedChip({ pluginId }: { pluginId: string }) {
         data-testid={`agent-plugin-unresolved-${pluginId}`}
         className="shrink-0 text-[11px] text-on-surface-variant"
       >
-        not discovered
+        Not discovered
       </span>
     </Link>
   );

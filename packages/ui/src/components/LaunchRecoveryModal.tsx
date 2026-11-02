@@ -87,7 +87,7 @@ function PolicyOption({
         {selected ? <Check className="h-3 w-3" /> : null}
         {label}
         {policy === "restore-original" ? (
-          <span className={cn("ml-auto text-[11px]", selected ? "text-white/70" : "text-secondary")}>default</span>
+          <span className={cn("ml-auto text-[11px]", selected ? "text-white/70" : "text-secondary")}>Default</span>
         ) : null}
       </div>
       <div
@@ -181,9 +181,9 @@ export function LaunchRecoveryModal({ rigId, rigName, open, onOpenChange }: Laun
           >
             <Ban className="h-3.5 w-3.5 text-tertiary shrink-0" />
             <div className="font-mono text-[11px] leading-relaxed text-tertiary">
-              <span className="font-bold">restore-original blocked</span> — {blockedSeats.length} seat(s)
+              <span className="font-bold">Restore-original blocked</span> — {blockedSeats.length} seat(s)
               need a decision. restore-original will NOT silently fresh-prime. Resolve each seat below, or switch to{" "}
-              <span className="underline">fresh</span> (identity-changing) for the whole rig.
+              <span className="underline">Fresh</span> (identity-changing) for the whole rig.
             </div>
           </div>
         ) : null}

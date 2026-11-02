@@ -67,7 +67,7 @@ export function HumanSeatCard({
               {pendingCount}
             </div>
             <div className="text-[11px] text-on-surface-variant mt-1">
-              pending
+              Pending
             </div>
           </div>
         </div>

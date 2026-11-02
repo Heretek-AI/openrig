@@ -53,7 +53,7 @@ export function AuditHistoryView() {
     <div data-testid="mc-view-audit-history" className="space-y-3 p-3">
       <header className="space-y-0.5">
         <div className="text-[11px] text-on-surface-variant">
-          audit-history
+          Audit-history
         </div>
         <h2 className="font-headline text-lg text-on-surface">Audit history</h2>
         <p className="text-xs text-on-surface-variant">

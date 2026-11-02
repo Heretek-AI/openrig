@@ -26,7 +26,7 @@ export function CliDriftIndicator({
     >
       {staleCliCount > 0 ? (
         <div data-testid="mc-cli-drift-stale-count">
-          <span className="text-[11px]">stale-cli</span>{" "}
+          <span className="text-[11px]">Stale-cli</span>{" "}
           {staleCliCount} {staleCliCount === 1 ? "rig" : "rigs"} running stale CLI
         </div>
       ) : null}
@@ -37,13 +37,13 @@ export function CliDriftIndicator({
       ) : null}
       {degradedFields.length > 0 ? (
         <div data-testid="mc-cli-drift-fields" className="mt-1">
-          <span className="text-[11px]">missing fields</span>{" "}
+          <span className="text-[11px]">Missing fields</span>{" "}
           {degradedFields.join(", ")}
         </div>
       ) : null}
       {sourceFallback ? (
         <div data-testid="mc-cli-drift-fallback" className="mt-1 text-amber-700">
-          <span className="text-[11px]">fallback</span>{" "}
+          <span className="text-[11px]">Fallback</span>{" "}
           {sourceFallback}
         </div>
       ) : null}

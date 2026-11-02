@@ -165,7 +165,7 @@ function Board({ review }: { review: ComposedMissionReview }) {
       <h3 className="text-[11px] text-on-surface-variant">SLICES</h3>
       {review.board.length === 0 ? (
         <p data-testid="board-empty" className="font-mono text-[11px] text-on-surface-variant">
-          no slices yet
+          No slices yet
         </p>
       ) : (
         <>
@@ -199,7 +199,7 @@ function Board({ review }: { review: ComposedMissionReview }) {
                         <span className="min-w-0 flex-1 truncate text-[12px]">{slot.title}</span>
                         {slot.attentionWorthy ? <span className="text-amber-700">▲</span> : null}
                         {slot.changedSinceStamp ? (
-                          <span className="text-[11px] text-amber-800">changed</span>
+                          <span className="text-[11px] text-amber-800">Changed</span>
                         ) : null}
                         <span className="font-mono text-[11px] text-on-surface-variant">{slot.stageCell}</span>
                       </button>
@@ -245,7 +245,7 @@ function Ledger({ review }: { review: ComposedMissionReview }) {
       <div data-testid="ledger-header" className="flex flex-wrap items-center justify-between gap-2 border-b border-outline-variant px-3 py-2">
         <div>
           <h3 className="text-[11px] font-semibold text-on-surface">SETTLED</h3>
-          <p className="text-[11px] text-on-surface-variant">completion ledger</p>
+          <p className="text-[11px] text-on-surface-variant">Completion ledger</p>
         </div>
         <p
           data-testid="cut-complete"
@@ -258,10 +258,10 @@ function Ledger({ review }: { review: ComposedMissionReview }) {
         <table className="w-full border-collapse text-[11px]">
           <thead>
             <tr className="border-b border-outline-variant text-[11px] text-on-surface-variant">
-              <th className="py-1 pr-2 text-left">slice</th>
-              <th className="py-1 pr-2 text-left">candidate</th>
-              <th className="py-1 pr-2 text-left">gates</th>
-              <th className="py-1 pr-2 text-left">merged</th>
+              <th className="py-1 pr-2 text-left">Slice</th>
+              <th className="py-1 pr-2 text-left">Candidate</th>
+              <th className="py-1 pr-2 text-left">Gates</th>
+              <th className="py-1 pr-2 text-left">Merged</th>
               <th className="py-1 text-left">needs-human</th>
             </tr>
           </thead>

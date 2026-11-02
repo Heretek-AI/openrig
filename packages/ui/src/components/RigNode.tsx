@@ -211,7 +211,7 @@ export function RigNode({ data }: { data: RigNodeData }) {
               className="text-[11px] text-on-surface-variant"
               title={`Activity sample is older than threshold; daemon may not be probing this seat`}
             >
-              stale
+              Stale
             </span>
           )}
           <span

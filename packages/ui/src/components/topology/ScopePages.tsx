@@ -431,7 +431,7 @@ export function RigScopePage() {
             data-testid="rig-status-selection-pending"
             className="text-[11px] text-on-surface-variant italic"
           >
-            resolving selected host…
+            Resolving selected host…
           </div>
         </div>
       ) : rigScopeIsRemote ? (

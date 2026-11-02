@@ -427,7 +427,7 @@ export function TerminalLauncher({ rigId, rigName }: TerminalLauncherProps) {
                                 <span className="font-mono text-[11px] text-on-surface truncate">{v.label}</span>
                                 {v.crossRig ? (
                                   <span className="inline-flex items-center gap-1 px-1 py-0.5 text-[11px] border border-outline text-on-surface-variant">
-                                    <Eye className="h-2.5 w-2.5" aria-hidden="true" /> read-only
+                                    <Eye className="h-2.5 w-2.5" aria-hidden="true" /> Read-only
                                   </span>
                                 ) : null}
                               </span>
@@ -435,7 +435,7 @@ export function TerminalLauncher({ rigId, rigName }: TerminalLauncherProps) {
                             </span>
                             <span className="shrink-0 text-right">
                               {vlive === null ? (
-                                <span className="block font-mono text-[11px] text-on-surface-variant">derived</span>
+                                <span className="block font-mono text-[11px] text-on-surface-variant">Derived</span>
                               ) : (
                                 <>
                                   <span className="block font-mono text-[11px] text-on-surface">{vlive} live</span>

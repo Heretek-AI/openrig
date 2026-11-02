@@ -83,7 +83,7 @@ export function FleetBand() {
           <span className="min-w-0 truncate">{worst.summary}</span>
         </span>
       ) : (
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-on-surface-variant">quiet</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-on-surface-variant">Quiet</span>
       )}
       <a href="/fleet" data-testid="fleet-band-open" className="text-[11px] text-on-surface hover:underline">
         open fleet →

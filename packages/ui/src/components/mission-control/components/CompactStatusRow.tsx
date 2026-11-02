@@ -130,25 +130,25 @@ export function CompactStatusRow({
         <div className="mt-2 grid grid-cols-1 gap-1 text-[11px] text-on-surface sm:grid-cols-2">
           {row.nextAction ? (
             <div data-testid="mc-next-action">
-              <span className="text-[11px] text-on-surface-variant">next</span>{" "}
+              <span className="text-[11px] text-on-surface-variant">Next</span>{" "}
               {row.nextAction}
             </div>
           ) : null}
           {row.pendingHumanDecision ? (
             <div data-testid="mc-pending-human-decision" className="text-amber-800">
-              <span className="text-[11px] text-amber-700">human</span>{" "}
+              <span className="text-[11px] text-amber-700">Human</span>{" "}
               {row.pendingHumanDecision}
             </div>
           ) : null}
           {row.readCost ? (
             <div data-testid="mc-read-cost">
-              <span className="text-[11px] text-on-surface-variant">read</span>{" "}
+              <span className="text-[11px] text-on-surface-variant">Read</span>{" "}
               {row.readCost}
             </div>
           ) : null}
           {row.confidenceFreshness ? (
             <div data-testid="mc-confidence-freshness">
-              <span className="text-[11px] text-on-surface-variant">conf</span>{" "}
+              <span className="text-[11px] text-on-surface-variant">Conf</span>{" "}
               {row.confidenceFreshness}
             </div>
           ) : null}

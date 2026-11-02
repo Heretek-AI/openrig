@@ -107,14 +107,14 @@ function DiscoveredSessionCard({ session, onAdopt }: { session: DiscoveredSessio
                 data-testid="runtime-inferred-note"
                 className="text-[11px] text-foreground-muted"
               >
-                runtime inferred
+                Runtime inferred
               </div>
             ) : null}
           </div>
           {session.cwd ? (
             <div className="mt-spacing-2 min-w-0">
               <div className="text-[11px] text-foreground-muted">
-                cwd
+                Cwd
               </div>
               <div
                 className="font-mono text-[12px] leading-5 text-foreground-muted truncate"
