@@ -56,7 +56,19 @@ function route(pathname: string, search: URLSearchParams): Response {
   if (pathname === "/api/config") {
     return json({
       settings: {
-        "workspace.root": { value: "/Users/x/code/workspace", source: "config", defaultValue: "" },
+        "daemon.port": { value: 7433, source: "default", defaultValue: 7433 },
+        "daemon.host": { value: "127.0.0.1", source: "default", defaultValue: "127.0.0.1" },
+        "db.path": { value: "~/.openrig/openrig.db", source: "default", defaultValue: "~/.openrig/openrig.db" },
+        "transcripts.enabled": { value: true, source: "default", defaultValue: true },
+        "transcripts.path": { value: "~/.openrig/transcripts", source: "default", defaultValue: "~/.openrig/transcripts" },
+        "workspace.root": { value: "/Users/x/code/workspace", source: "file", defaultValue: "" },
+        "workspace.slices_root": { value: "/Users/x/code/workspace/slices", source: "default", defaultValue: "" },
+        "workspace.steering_path": { value: "/Users/x/code/workspace/steering", source: "default", defaultValue: "" },
+        "workspace.specs_root": { value: "/Users/x/code/workspace/specs", source: "default", defaultValue: "" },
+        "workspace.projects_root": { value: "/Users/x/code/workspace/projects", source: "default", defaultValue: "" },
+        "workspace.catalog_path": { value: "/Users/x/code/workspace/catalog.json", source: "default", defaultValue: "" },
+        "files.allowlist": { value: "workspace:/Users/x/code/workspace", source: "default", defaultValue: "" },
+        "progress.scan_roots": { value: "workspace:/Users/x/code/workspace", source: "env", defaultValue: "" },
         "ui.preview.default_lines": { value: 100, source: "default", defaultValue: 100 },
         "ui.preview.refresh_interval_seconds": { value: 3, source: "default", defaultValue: 3 },
       },
