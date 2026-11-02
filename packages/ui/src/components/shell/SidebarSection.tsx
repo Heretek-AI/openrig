@@ -3,27 +3,7 @@
 import { useState } from "react";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { cn } from "../../lib/utils.js";
-
-export const SIDEBAR_FOLDED_STORAGE_KEY = "openrig.sidebar.folded";
-
-function readFolded(): string[] {
-  try {
-    const raw = window.localStorage.getItem(SIDEBAR_FOLDED_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeFolded(ids: string[]): void {
-  try {
-    window.localStorage.setItem(SIDEBAR_FOLDED_STORAGE_KEY, JSON.stringify(ids));
-  } catch {
-    // Safari private mode throws on localStorage access.
-  }
-}
+import { readFoldedSections, writeFoldedSections } from "../../lib/sidebar-mode.js";
 
 export interface SidebarSectionProps {
   id: string;
@@ -34,7 +14,7 @@ export interface SidebarSectionProps {
 
 export function SidebarSection({ id, label, collapsed, children }: SidebarSectionProps) {
   const [folded, setFolded] = useState<string[]>(() =>
-    typeof window === "undefined" ? [] : readFolded(),
+    typeof window === "undefined" ? [] : readFoldedSections(),
   );
   const isFolded = folded.includes(id);
   // The `top` section has no label and is never foldable.
@@ -43,7 +23,7 @@ export function SidebarSection({ id, label, collapsed, children }: SidebarSectio
   const setOpen = (open: boolean) => {
     setFolded((prev) => {
       const next = open ? prev.filter((v) => v !== id) : [...prev.filter((v) => v !== id), id];
-      writeFolded(next);
+      writeFoldedSections(next);
       return next;
     });
   };

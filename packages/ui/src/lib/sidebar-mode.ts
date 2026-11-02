@@ -32,6 +32,25 @@ export function writeSidebarMode(mode: SidebarMode): void {
   safeSet(SIDEBAR_MODE_STORAGE_KEY, mode);
 }
 
+/** Folded sidebar section ids, persisted as a JSON array. */
+export const SIDEBAR_FOLDED_STORAGE_KEY = "openrig.sidebar.folded";
+
+export function readFoldedSections(): string[] {
+  const raw = typeof window === "undefined" ? null : safeGet(SIDEBAR_FOLDED_STORAGE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeFoldedSections(ids: string[]): void {
+  if (typeof window === "undefined") return;
+  safeSet(SIDEBAR_FOLDED_STORAGE_KEY, JSON.stringify(ids));
+}
+
 /** auto: collapsed when an Explorer column is visible on desktop, expanded otherwise. */
 export function isSidebarCollapsed(mode: SidebarMode, explorerVisible: boolean): boolean {
   if (mode === "collapsed") return true;
