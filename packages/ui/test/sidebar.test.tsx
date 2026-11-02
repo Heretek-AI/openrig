@@ -1,29 +1,15 @@
 // ui-redesign C06: sidebar shell tests.
 
 import { describe, it, expect, vi } from "vitest";
-import { render, waitFor, screen, fireEvent } from "@testing-library/react";
-import { createAppTestRouter } from "./helpers/test-router.js";
-import { setupAppShellTestEnv } from "./helpers/app-shell-env.js";
+import { screen, fireEvent } from "@testing-library/react";
+import { setupAppShellTestEnv, renderAppShellAt } from "./helpers/app-shell-env.js";
 import { AppShell } from "../src/components/AppShell.js";
 import { SIDEBAR_MODE_STORAGE_KEY } from "../src/lib/sidebar-mode.js";
 
 setupAppShellTestEnv();
 
-async function renderAt(initialPath: string, opts: { innerWidth?: number } = {}) {
-  Object.defineProperty(window, "innerWidth", { configurable: true, value: opts.innerWidth ?? 1440, writable: true });
-  window.dispatchEvent(new Event("resize"));
-  const result = render(
-    createAppTestRouter({
-      routes: [{ path: "$", component: () => null }],
-      rootComponent: ({ children }) => <AppShell>{children}</AppShell>,
-      initialPath,
-    }),
-  );
-  await waitFor(() => {
-    expect(result.container.querySelector("[data-testid='app-rail']")).toBeTruthy();
-  }, { timeout: 5000 });
-  return result;
-}
+const renderAt = (initialPath: string, opts: { innerWidth?: number } = {}) =>
+  renderAppShellAt(AppShell, initialPath, opts);
 
 const ALL_SIDEBAR_TESTIDS = [
   "rail-dashboard",

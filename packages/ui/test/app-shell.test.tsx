@@ -18,11 +18,9 @@
 //   remains surface=none (no Explorer).
 
 import { describe, it, expect } from "vitest";
-import { render, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { createAppTestRouter } from "./helpers/test-router.js";
-import { setupAppShellTestEnv } from "./helpers/app-shell-env.js";
+import { setupAppShellTestEnv, renderAppShellAt } from "./helpers/app-shell-env.js";
 import { AppShell } from "../src/components/AppShell.js";
 
 setupAppShellTestEnv();
@@ -35,22 +33,8 @@ setupAppShellTestEnv();
 // PATHNAME (surfaceForPath), not by the route tree — so a minimal router with
 // AppShell as the root and a catch-all stub renders IDENTICAL chrome with no
 // heavy import and no clock to race.
-async function renderAt(initialPath: string, opts: { innerWidth?: number } = {}) {
-  Object.defineProperty(window, "innerWidth", { configurable: true, value: opts.innerWidth ?? 1440, writable: true });
-  window.dispatchEvent(new Event("resize"));
-  const result = render(
-    createAppTestRouter({
-      routes: [{ path: "$", component: () => null }],
-      rootComponent: ({ children }) => <AppShell>{children}</AppShell>,
-      initialPath,
-    }),
-  );
-  // TanStack Router resolves route component async; wait for chrome to land.
-  await waitFor(() => {
-    expect(result.container.querySelector("[data-testid='app-rail']")).toBeTruthy();
-  }, { timeout: 5000 });
-  return result;
-}
+const renderAt = (initialPath: string, opts: { innerWidth?: number } = {}) =>
+  renderAppShellAt(AppShell, initialPath, opts);
 
 describe("AppShell — Phase 2 chrome", () => {
   describe("SC-1: exactly 2 left chromes on desktop (rail + explore)", () => {
