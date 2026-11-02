@@ -4,6 +4,9 @@ export type SidebarMode = "auto" | "expanded" | "collapsed";
 
 export const SIDEBAR_MODE_STORAGE_KEY = "openrig.sidebar.mode";
 
+/** Folded sidebar section ids, persisted as a JSON array. */
+export const SIDEBAR_FOLDED_STORAGE_KEY = "openrig.sidebar.folded";
+
 function safeGet(key: string): string | null {
   try {
     return window.localStorage.getItem(key);
@@ -21,22 +24,27 @@ function safeSet(key: string, value: string): void {
   }
 }
 
+function readStored(key: string): string | null {
+  return typeof window === "undefined" ? null : safeGet(key);
+}
+
+function writeStored(key: string, value: string): void {
+  if (typeof window === "undefined") return;
+  safeSet(key, value);
+}
+
 export function readSidebarMode(): SidebarMode {
-  const raw = typeof window === "undefined" ? null : safeGet(SIDEBAR_MODE_STORAGE_KEY);
+  const raw = readStored(SIDEBAR_MODE_STORAGE_KEY);
   if (raw === "auto" || raw === "expanded" || raw === "collapsed") return raw;
   return "auto";
 }
 
 export function writeSidebarMode(mode: SidebarMode): void {
-  if (typeof window === "undefined") return;
-  safeSet(SIDEBAR_MODE_STORAGE_KEY, mode);
+  writeStored(SIDEBAR_MODE_STORAGE_KEY, mode);
 }
 
-/** Folded sidebar section ids, persisted as a JSON array. */
-export const SIDEBAR_FOLDED_STORAGE_KEY = "openrig.sidebar.folded";
-
 export function readFoldedSections(): string[] {
-  const raw = typeof window === "undefined" ? null : safeGet(SIDEBAR_FOLDED_STORAGE_KEY);
+  const raw = readStored(SIDEBAR_FOLDED_STORAGE_KEY);
   if (!raw) return [];
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -47,8 +55,7 @@ export function readFoldedSections(): string[] {
 }
 
 export function writeFoldedSections(ids: string[]): void {
-  if (typeof window === "undefined") return;
-  safeSet(SIDEBAR_FOLDED_STORAGE_KEY, JSON.stringify(ids));
+  writeStored(SIDEBAR_FOLDED_STORAGE_KEY, JSON.stringify(ids));
 }
 
 /** auto: collapsed when an Explorer column is visible on desktop, expanded otherwise. */
