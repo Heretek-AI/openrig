@@ -299,24 +299,19 @@ describe("AppShell — Phase 2 chrome", () => {
       expect(rail.className).not.toMatch(/\boverflow-x-auto\b/);
     });
 
-    // Slice 20 mobile: rail icon tap targets meet iOS HIG minimum
-    // (44px) on mobile, AND restore the prior 40px hitbox at lg: width
-    // so desktop hover precision is preserved. The className carries
-    // both shapes: `h-11 w-11` (mobile default) + `lg:h-10 lg:w-10`
-    // (desktop override). Tailwind's mobile-first cascade ensures the
-    // larger square only paints at < lg: viewports.
-    it("slice 20: rail icon tap targets are ≥44px on mobile + restored to 40px at lg:", async () => {
+    // C06 sidebar: nav items keep a >=44px tap target on mobile
+    // (`h-11`) and a compact 36px row at lg: (`lg:h-9`). The icon is
+    // centered when the sidebar is collapsed, so no width assertion.
+    it("nav items keep a ≥44px tap target on mobile", async () => {
       const { container } = await renderAt("/");
       const dashIcon = container.querySelector(
         "[data-testid='rail-dashboard']",
       ) as HTMLElement;
       expect(dashIcon, "rail dashboard icon link").toBeTruthy();
-      // Mobile default: 44px square.
+      // Mobile default: 44px tall row.
       expect(dashIcon.className).toMatch(/\bh-11\b/);
-      expect(dashIcon.className).toMatch(/\bw-11\b/);
-      // Desktop override: lg: prefix restores the 40px hitbox.
-      expect(dashIcon.className).toMatch(/\blg:h-10\b/);
-      expect(dashIcon.className).toMatch(/\blg:w-10\b/);
+      // Desktop override: lg: prefix restores the compact 36px row.
+      expect(dashIcon.className).toMatch(/\blg:h-9\b/);
     });
   });
 

@@ -365,9 +365,10 @@ export function Explorer({
         "fixed top-14 bottom-0 left-0 transition-transform duration-200 ease-tactical w-72 max-w-[80vw]",
         open ? "translate-x-0" : "-translate-x-full",
         // Desktop (>=lg): persistent column at 280px (lg:w-72) per
-        // universal-shell.md L34. Positioned absolutely after the 48px
-        // rail.
-        "lg:absolute lg:top-0 lg:bottom-0 lg:left-12 lg:w-72 lg:max-w-none lg:translate-x-0",
+        // universal-shell.md L34. Positioned absolutely after the sidebar
+        // (left edge = --sidebar-current-width, set on the flex wrapper
+        // in AppShell).
+        "lg:absolute lg:top-0 lg:bottom-0 lg:left-[var(--sidebar-current-width)] lg:w-72 lg:max-w-none lg:translate-x-0",
       )}
     >
       <div className="relative flex h-full w-full flex-col">
