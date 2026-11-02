@@ -6,7 +6,26 @@
 // (Attempt-2 violated this by using separate routes per view-mode.)
 
 import { useState, useEffect } from "react";
-import { useParams } from "@tanstack/react-router";
+import { useParams, Link } from "@tanstack/react-router";
+import { PageHeader } from "../ui/page-header.js";
+import { StatusBadge } from "../ui/status-badge.js";
+import { Button } from "../ui/button.js";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "../ui/dropdown-menu.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog.js";
+import { useStartRig, useLaunchRig, useTeardownRig, useCreateSnapshot } from "../../hooks/mutations.js";
 import {
   TopologyViewModeTabs,
   HOST_SCOPE_TABS,
@@ -83,10 +102,39 @@ function useOverlayForActiveTab(active: string) {
   }, [active, setMode]);
 }
 
+/** Anchored bar: sits at left = var(--explorer-anchor-left)
+ *  (set on <main> in AppShell) so position is identical across graph /
+ *  table / terminal switches. Transparent over the canvas — paper-grid
+ *  shows through. z-30 keeps content above the Explorer overlay in graph
+ *  mode (anchored past the Explorer's right edge so overlap shouldn't
+ *  happen, but z-order is the safety net). C12 renders the PageHeader in
+ *  one and the tab nav in another so they share the same left edge. */
+function ScopeAnchoredBar({
+  children,
+  testId,
+}: {
+  children: React.ReactNode;
+  testId?: string;
+}) {
+  return (
+    <div
+      className="relative z-30 px-6 pt-4"
+      style={{ marginLeft: "var(--header-anchor-offset, 0px)" }}
+      {...(testId ? { "data-testid": testId } : {})}
+    >
+      {children}
+    </div>
+  );
+}
+
 function ScopeShell({
+  header,
   tabsNav,
   children,
 }: {
+  /** Optional C12 PageHeader rendered above the tab nav at the same
+   *  anchored left offset (graph-overlay alignment). */
+  header?: React.ReactNode;
   /** Eyebrow + title are no longer rendered: tabs only, anchored to
    *  the right of Explorer. The scope
    *  identity reads from the URL + Explorer tree active state, so the
@@ -98,20 +146,19 @@ function ScopeShell({
   tabsNav: React.ReactNode;
   children: React.ReactNode;
 }) {
-  // Class B fixed-anchor: tabsNav sits at left = var(--explorer-anchor-left)
-  // (set on <main> in AppShell) so position is identical across graph /
-  // table / terminal switches. Transparent over the canvas — paper-grid
-  // shows through. z-30 keeps tabs above the Explorer overlay in graph
-  // mode (the tabs are anchored past the Explorer's right edge so they
-  // shouldn't actually overlap, but z-order is the safety net).
+  // Class B fixed-anchor: header and tabsNav each sit in a ScopeAnchoredBar
+  // at left = var(--explorer-anchor-left) (set on <main> in AppShell) so
+  // position is identical across graph / table / terminal switches.
   return (
     <div className="flex flex-col h-full">
-      <div
-        className="relative z-30 px-6 pt-4"
-        style={{ marginLeft: "var(--header-anchor-offset, 0px)" }}
-      >
+      {header ? (
+        <ScopeAnchoredBar testId="scope-page-header-anchor">
+          {header}
+        </ScopeAnchoredBar>
+      ) : null}
+      <ScopeAnchoredBar>
         {tabsNav}
-      </div>
+      </ScopeAnchoredBar>
       {/* flex column so the active view-mode panel can fill remaining
           height. min-h-0 lets the flex child shrink correctly inside
           the AppShell main scroll container. */}
@@ -159,6 +206,17 @@ export function HostScopePage() {
     <ScopeShell
       eyebrow="Topology · Host"
       title={isRemote ? selectedHost : ownName}
+      header={
+        <PageHeader
+          title="Rigs"
+          description="Every rig on this host. Open one to see its agents."
+          actions={
+            <Button asChild data-testid="new-rig-button">
+              <Link to="/specs/rig">New rig</Link>
+            </Button>
+          }
+        />
+      }
       tabsNav={<TopologyViewModeTabs tabs={HOST_SCOPE_TABS} active={active} onSelect={setActive} testIdPrefix="topology-host" />}
     >
       {remoteUnreachable ? (
@@ -236,6 +294,74 @@ export function HostScopePage() {
   );
 }
 
+/**
+ * C12 rig actions menu: Start (`useStartRig`, mutate() — bodyless
+ * POST /api/rigs/:id/up), Launch (`useLaunchRig`, mutate() — POST with
+ * `{}` body when no fresh seat list), Save snapshot (`useCreateSnapshot`,
+ * mutate() — bodyless POST /api/rigs/:id/snapshots), separator, Stop rig
+ * (`useTeardownRig`, mutate() — POST /api/down with
+ * `{ rigId }` JSON body, `destructive`). Rendered only for a known-local
+ * host selection (OPR.0.4.6.MH2 B1: remote gets no local mutation affordance).
+ * "Stop rig" opens a confirm Dialog; dialog "Stop rig" calls teardown.mutate().
+ */
+export function RigActionsMenu({ rigId, rigName }: { rigId: string; rigName: string }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const startMut = useStartRig(rigId);
+  const launchMut = useLaunchRig(rigId);
+  const snapshotMut = useCreateSnapshot(rigId);
+  const teardownMut = useTeardownRig(rigId);
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button data-testid="rig-actions" variant="outline">
+            Actions
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => startMut.mutate(undefined)}>Start</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => launchMut.mutate(undefined)}>Launch</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => snapshotMut.mutate(undefined)}>Save snapshot</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {/* Defer the dialog open one task: mounting a Radix Dialog
+              synchronously inside the menu's select dispatch fights the
+              menu-close focus handoff (infinite focus loop in jsdom; flaky
+              focus steal in real browsers). The menu finishes closing, then
+              the confirm dialog opens. */}
+          <DropdownMenuItem destructive onSelect={() => window.setTimeout(() => setConfirmOpen(true), 0)}>
+            Stop rig
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent data-testid="rig-stop-confirm">
+          <DialogHeader>
+            <DialogTitle>Stop {rigName}?</DialogTitle>
+            <DialogDescription>
+              All agents in this rig will be stopped. You can start it again later.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              data-testid="rig-stop-confirm-button"
+              onClick={() => {
+                teardownMut.mutate();
+                setConfirmOpen(false);
+              }}
+            >
+              Stop rig
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export function RigScopePage() {
   // OPR.0.4.6.MH2 guard delta-confirm blocker: lifecycle/action surfaces are
   // TRI-STATE — unknown selection mounts NO local controls and fires NO bare
@@ -260,6 +386,20 @@ export function RigScopePage() {
     <ScopeShell
       eyebrow="Topology · Rig"
       title={rig?.name ?? rigId}
+      header={
+        <PageHeader
+          title={rig?.name ?? rigId}
+          meta={
+            <>
+              <StatusBadge status={rig?.lifecycleState ?? "unknown"} testId="rig-lifecycle-badge" />
+              <span className="font-mono text-xs text-on-surface-variant" data-testid="rig-id-mono">
+                {rigId}
+              </span>
+            </>
+          }
+          actions={rigScopeActionsAllowed ? <RigActionsMenu rigId={rigId} rigName={rig?.name ?? rigId} /> : null}
+        />
+      }
       tabsNav={
         <TopologyViewModeTabs
           tabs={RIG_POD_SCOPE_TABS}
