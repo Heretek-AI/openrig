@@ -102,6 +102,31 @@ function useOverlayForActiveTab(active: string) {
   }, [active, setMode]);
 }
 
+/** Anchored bar: sits at left = var(--explorer-anchor-left)
+ *  (set on <main> in AppShell) so position is identical across graph /
+ *  table / terminal switches. Transparent over the canvas — paper-grid
+ *  shows through. z-30 keeps content above the Explorer overlay in graph
+ *  mode (anchored past the Explorer's right edge so overlap shouldn't
+ *  happen, but z-order is the safety net). C12 renders the PageHeader in
+ *  one and the tab nav in another so they share the same left edge. */
+function ScopeAnchoredBar({
+  children,
+  testId,
+}: {
+  children: React.ReactNode;
+  testId?: string;
+}) {
+  return (
+    <div
+      className="relative z-30 px-6 pt-4"
+      style={{ marginLeft: "var(--header-anchor-offset, 0px)" }}
+      {...(testId ? { "data-testid": testId } : {})}
+    >
+      {children}
+    </div>
+  );
+}
+
 function ScopeShell({
   header,
   tabsNav,
@@ -121,29 +146,19 @@ function ScopeShell({
   tabsNav: React.ReactNode;
   children: React.ReactNode;
 }) {
-  // Class B fixed-anchor: tabsNav sits at left = var(--explorer-anchor-left)
-  // (set on <main> in AppShell) so position is identical across graph /
-  // table / terminal switches. Transparent over the canvas — paper-grid
-  // shows through. z-30 keeps tabs above the Explorer overlay in graph
-  // mode (the tabs are anchored past the Explorer's right edge so they
-  // shouldn't actually overlap, but z-order is the safety net).
+  // Class B fixed-anchor: header and tabsNav each sit in a ScopeAnchoredBar
+  // at left = var(--explorer-anchor-left) (set on <main> in AppShell) so
+  // position is identical across graph / table / terminal switches.
   return (
     <div className="flex flex-col h-full">
       {header ? (
-        <div
-          className="relative z-30 px-6 pt-4"
-          style={{ marginLeft: "var(--header-anchor-offset, 0px)" }}
-          data-testid="scope-page-header-anchor"
-        >
+        <ScopeAnchoredBar testId="scope-page-header-anchor">
           {header}
-        </div>
+        </ScopeAnchoredBar>
       ) : null}
-      <div
-        className="relative z-30 px-6 pt-4"
-        style={{ marginLeft: "var(--header-anchor-offset, 0px)" }}
-      >
+      <ScopeAnchoredBar>
         {tabsNav}
-      </div>
+      </ScopeAnchoredBar>
       {/* flex column so the active view-mode panel can fill remaining
           height. min-h-0 lets the flex child shrink correctly inside
           the AppShell main scroll container. */}

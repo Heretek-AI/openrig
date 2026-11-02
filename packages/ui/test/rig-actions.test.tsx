@@ -90,6 +90,30 @@ async function renderRigPage() {
   return result;
 }
 
+/** Render the standalone actions menu and open it via keyboard Enter.
+ *  Shared by the Cancel and teardown tests so the menu-open flow
+ *  (trigger → menuitem "Stop rig") is asserted in one place. */
+function renderOpenMenu() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <RigActionsMenu rigId="rig_alpha" rigName="acme-build" />
+    </QueryClientProvider>,
+  );
+  const trigger = document.body.querySelector("[data-testid='rig-actions']") as HTMLElement;
+  expect(trigger).toBeTruthy();
+  fireEvent.keyDown(trigger, { key: "Enter" });
+}
+
+/** After renderOpenMenu, find the destructive "Stop rig" menu item and click it. */
+function clickStopMenuItem() {
+  const stopItem = Array.from(document.body.querySelectorAll("[role='menuitem']")).find((e) =>
+    e.textContent?.includes("Stop rig"),
+  ) as HTMLElement | undefined;
+  expect(stopItem).toBeTruthy();
+  fireEvent.click(stopItem as HTMLElement);
+}
+
 describe("C12: rig actions menu", () => {
   it("page header shows rig name, lifecycle badge, and mono rig id", async () => {
     const { container } = await renderRigPage();
@@ -117,21 +141,9 @@ describe("C12: rig actions menu", () => {
 
 
   it("\"Stop rig\" opens the confirm dialog; Cancel closes it without calling fetch", async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <RigActionsMenu rigId="rig_alpha" rigName="acme-build" />
-      </QueryClientProvider>,
-    );
-    const trigger = document.body.querySelector("[data-testid='rig-actions']") as HTMLElement;
-    expect(trigger).toBeTruthy();
-    fireEvent.keyDown(trigger, { key: "Enter" });
-    const stopItem = Array.from(document.body.querySelectorAll("[role='menuitem']")).find((e) =>
-      e.textContent?.includes("Stop rig"),
-    ) as HTMLElement | undefined;
-    expect(stopItem).toBeTruthy();
+    renderOpenMenu();
+    clickStopMenuItem();
     const callsBefore = mockFetch.mock.calls.length;
-    fireEvent.click(stopItem as HTMLElement);
     await waitFor(() => {
       expect(document.body.textContent).toContain("All agents in this rig will be stopped");
     });
@@ -145,20 +157,8 @@ describe("C12: rig actions menu", () => {
   });
 
   it("\"Stop rig\" in the dialog calls the teardown endpoint with the rig id", async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <RigActionsMenu rigId="rig_alpha" rigName="acme-build" />
-      </QueryClientProvider>,
-    );
-    const trigger = document.body.querySelector("[data-testid='rig-actions']") as HTMLElement;
-    expect(trigger).toBeTruthy();
-    fireEvent.keyDown(trigger, { key: "Enter" });
-    const stopItem = Array.from(document.body.querySelectorAll("[role='menuitem']")).find((e) =>
-      e.textContent?.includes("Stop rig"),
-    ) as HTMLElement | undefined;
-    expect(stopItem).toBeTruthy();
-    fireEvent.click(stopItem as HTMLElement);
+    renderOpenMenu();
+    clickStopMenuItem();
     const confirmBtn = await waitFor(() => {
       const el = document.body.querySelector("[data-testid='rig-stop-confirm-button']") as HTMLElement | null;
       expect(el).toBeTruthy();
