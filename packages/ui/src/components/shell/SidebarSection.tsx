@@ -28,13 +28,16 @@ export function SidebarSection({ id, label, collapsed, children }: SidebarSectio
     });
   };
 
+  const heading = label && !collapsed ? (
+    <h2 className="px-3 pt-4 pb-1 text-xs font-medium text-on-surface-variant">{label}</h2>
+  ) : null;
+  const body = <>{children}</>;
+
   if (!foldable) {
     return (
       <div role="group" aria-label={label ?? undefined}>
-        {label && !collapsed ? (
-          <h2 className="px-3 pt-4 pb-1 text-xs font-medium text-on-surface-variant">{label}</h2>
-        ) : null}
-        {children}
+        {heading}
+        {body}
       </div>
     );
   }
@@ -56,7 +59,7 @@ export function SidebarSection({ id, label, collapsed, children }: SidebarSectio
             </span>
           </span>
         </Collapsible.Trigger>
-        <Collapsible.Content>{children}</Collapsible.Content>
+        <Collapsible.Content>{body}</Collapsible.Content>
       </div>
     </Collapsible.Root>
   );

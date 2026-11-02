@@ -48,38 +48,30 @@ function SearchButton({ collapsed }: { collapsed: boolean }) {
   const openPalette = () => {
     window.dispatchEvent(new CustomEvent("openrig:open-palette"));
   };
-  if (collapsed) {
-    return (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              data-testid="sidebar-search"
-              aria-label="Search"
-              onClick={openPalette}
-              className="flex h-11 lg:h-9 w-11 lg:w-9 items-center justify-center rounded-md px-0 text-sm font-medium text-on-surface-variant transition-colors hover:bg-surface-low hover:text-on-surface"
-            >
-              <Search className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right">Search</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    );
-  }
-  return (
+  const button = (
     <button
       type="button"
       data-testid="sidebar-search"
       aria-label="Search"
       onClick={openPalette}
-      className="flex h-11 lg:h-9 items-center gap-3 rounded-md px-3 text-sm font-medium text-on-surface-variant transition-colors hover:bg-surface-low hover:text-on-surface"
+      className={cn(
+        "flex h-11 lg:h-9 items-center rounded-md text-sm font-medium text-on-surface-variant transition-colors hover:bg-surface-low hover:text-on-surface",
+        collapsed ? "justify-center px-0 w-11 lg:w-9" : "gap-3 px-3",
+      )}
     >
-      <Search className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-      <span className="flex-1 text-left">Search</span>
-      <Kbd>⌘K</Kbd>
+      <Search className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+      <span className={collapsed ? "sr-only" : "flex-1 text-left"}>Search</span>
+      {!collapsed ? <Kbd>⌘K</Kbd> : null}
     </button>
+  );
+  if (!collapsed) return button;
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent side="right">Search</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
@@ -98,11 +90,18 @@ export function Sidebar({
   const attentionQuery = useAttentionItems(50, subs.anyRemoteEnabled);
   const inboxBadge = attentionQuery.data?.items.length ?? 0;
 
-  const chatItems: Array<NavItem & { activeWhen: (p: string) => boolean }> = NAV_CHAT.map((c) => ({
-    ...c,
-    to: resolveChatTo(readSettingString(settingsData, `agents.${c.role}_session`), c.role),
-    activeWhen: () => false,
-  }));
+  const renderItem = (item: NavItem & { activeWhen: (p: string) => boolean }, badge = 0) => (
+    <div key={item.id}>
+      <SidebarNavItem
+        item={item}
+        pathname={pathname}
+        collapsed={effectiveCollapsed}
+        badge={badge}
+        onNavigate={onMobileClose}
+      />
+      {item.id === "rigs" ? <SidebarRigList collapsed={effectiveCollapsed} /> : null}
+    </div>
+  );
 
   return (
     <nav
@@ -147,18 +146,7 @@ export function Sidebar({
             label={section.label}
             collapsed={effectiveCollapsed}
           >
-            {section.items.map((item) => (
-              <div key={item.id}>
-                <SidebarNavItem
-                  item={item}
-                  pathname={pathname}
-                  collapsed={effectiveCollapsed}
-                  badge={item.id === "inbox" ? inboxBadge : 0}
-                  onNavigate={onMobileClose}
-                />
-                {item.id === "rigs" ? <SidebarRigList collapsed={effectiveCollapsed} /> : null}
-              </div>
-            ))}
+            {section.items.map((item) => renderItem(item, item.id === "inbox" ? inboxBadge : 0))}
           </SidebarSection>
         ))}
 
@@ -166,28 +154,18 @@ export function Sidebar({
 
         {/* Chat group */}
         <SidebarSection id="chat" label="Chat" collapsed={effectiveCollapsed}>
-          {chatItems.map((item) => (
-            <SidebarNavItem
-              key={item.id}
-              item={item}
-              pathname={pathname}
-              collapsed={effectiveCollapsed}
-              onNavigate={onMobileClose}
-            />
-          ))}
+          {NAV_CHAT.map((c) =>
+            renderItem({
+              ...c,
+              to: resolveChatTo(readSettingString(settingsData, `agents.${c.role}_session`), c.role),
+              activeWhen: () => false,
+            }),
+          )}
         </SidebarSection>
 
         {/* Footer */}
         <SidebarSection id="footer" label={null} collapsed={effectiveCollapsed}>
-          {NAV_FOOTER.map((item) => (
-            <SidebarNavItem
-              key={item.id}
-              item={item}
-              pathname={pathname}
-              collapsed={effectiveCollapsed}
-              onNavigate={onMobileClose}
-            />
-          ))}
+          {NAV_FOOTER.map((item) => renderItem(item))}
         </SidebarSection>
       </div>
     </nav>
