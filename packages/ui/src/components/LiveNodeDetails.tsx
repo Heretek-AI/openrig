@@ -653,13 +653,13 @@ function TabNav({
           aria-selected={activeTab === tab}
           data-testid={`live-tab-${tab}`}
           onClick={() => onSelect(tab)}
-          className={`min-h-11 px-3 py-2 text-[11px] transition-colors ${
+          className={`min-h-11 px-3 py-2 text-sm transition-colors ${
             activeTab === tab
-              ? "border-b-2 border-on-surface text-on-surface font-bold -mb-px"
+              ? "border-b-2 border-on-surface text-on-surface font-medium -mb-px"
               : "text-on-surface-variant hover:text-on-surface"
           }`}
         >
-          {tab.replace("-", " ")}
+          {tab.charAt(0).toUpperCase() + tab.slice(1).replace("-", " ")}
         </button>
       ))}
     </div>

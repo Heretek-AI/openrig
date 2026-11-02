@@ -48,14 +48,14 @@ export function SeatOverviewSecondary({ data }: SeatOverviewSecondaryProps) {
       <dl className="divide-y divide-outline-variant/55">
         <Row
           fieldKey="cwd"
-          label="cwd"
+          label="Working directory"
           value={data.cwd}
           mono
           titleAttr={data.cwd ?? undefined}
         />
         <Row
           fieldKey="current-work"
-          label="current work"
+          label="Current work"
           value={currentWorkValue}
         />
       </dl>
@@ -82,7 +82,7 @@ function Row({
       className="flex min-w-0 items-baseline gap-3 px-3 py-1.5"
       title={titleAttr}
     >
-      <dt className="shrink-0 font-mono text-[11px] lowercase text-on-surface-variant">
+      <dt className="shrink-0 text-xs text-on-surface-variant">
         {label}
       </dt>
       <dd
