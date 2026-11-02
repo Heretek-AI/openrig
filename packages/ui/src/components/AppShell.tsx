@@ -47,6 +47,8 @@ import { useClearPlacementOnHostSwitch } from "../hooks/useHosts.js";
 import { useGlobalEvents } from "../hooks/useGlobalEvents.js";
 import { cn } from "../lib/utils.js";
 import { HostIndicator } from "./HostIndicator.js";
+import { useTheme } from "./ThemeProvider.js";
+import { Toaster } from "sonner";
 import { Sidebar } from "./shell/Sidebar.js";
 import { isSidebarCollapsed, readSidebarMode, writeSidebarMode } from "../lib/sidebar-mode.js";
 
@@ -155,6 +157,7 @@ function AppShellInner({ children }: AppShellProps) {
   const [placementTarget, setPlacementTargetState] = useState<DiscoveryPlacementTarget>(null);
 
   const { events } = useActivityFeed();
+  const { resolved } = useTheme();
 
   const setSelection = useCallback(
     (next: DrawerSelection) => {
@@ -460,6 +463,9 @@ function AppShellInner({ children }: AppShellProps) {
                   Self-hides when no pins; positioned right edge under the
                   drawer when drawer mounted. */}
               <PreviewStack />
+
+              {/* C09: toasts for rig actions (sonner). Mounted once here. */}
+              <Toaster position="bottom-right" richColors={false} closeButton theme={resolved} />
 
               {/* V1 attempt-3 Phase 5 P5-9 — Mobile bottom nav per
                   universal-shell.md L135 + L144: For You / Project /
