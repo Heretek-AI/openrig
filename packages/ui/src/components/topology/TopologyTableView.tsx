@@ -468,7 +468,7 @@ export function TopologyTableView({ rigIdScope, podNameScope }: { rigIdScope?: s
           {table.getFilteredRowModel().rows.length} of {activityData.length}
         </span>
       </div>
-      <div className="border border-outline-variant overflow-x-auto">
+      <div className="relative overflow-x-auto rounded-lg border border-outline-variant">
         <table className="w-full text-left">
           <thead className="bg-background border-b border-outline-variant">
             {table.getHeaderGroups().map((hg) => (

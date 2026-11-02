@@ -380,7 +380,7 @@ export function Feed() {
   // still imports them) — only this band's wiring was dropped.
 
   return (
-    <div data-testid="for-you-feed" className="mx-auto w-full max-w-3xl px-6 py-6">
+    <div data-testid="for-you-feed" className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
       <PageHeader
         title="Inbox"
         description="Approvals, questions and updates from your agents."
@@ -399,7 +399,7 @@ export function Feed() {
         data-testid="feed-lens-chips"
         role="toolbar"
         aria-label="Feed filters"
-        className="mb-4 inline-flex rounded-lg border bg-surface-lowest p-0.5"
+        className="mb-4 inline-flex max-w-full overflow-x-auto rounded-lg border bg-surface-lowest p-0.5"
       >
         {LENS_CHIPS.map((c) => (
           <button
@@ -429,7 +429,7 @@ export function Feed() {
           data-testid="feed-host-chips"
           role="toolbar"
           aria-label="Host filter"
-          className="mb-2 inline-flex rounded-lg border bg-surface-lowest p-0.5"
+          className="mb-2 inline-flex max-w-full overflow-x-auto rounded-lg border bg-surface-lowest p-0.5"
         >
           <button
             type="button"
