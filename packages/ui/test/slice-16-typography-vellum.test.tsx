@@ -39,6 +39,18 @@ describe("FeedCard typography + list-row chrome (C11 Inbox v2)", () => {
     expect(source).not.toMatch(/tracking-\[0\.16em\]/);
   });
 
+  it("FeedCard no longer imports the dashboard/vellum barrel (C11 replaces the old CornerBracket test)", async () => {
+    const source = await readSource("src/components/for-you/FeedCard.tsx");
+    expect(source).not.toContain('from "../dashboard/vellum/index.js"');
+    expect(source).not.toMatch(/boxShadow:\s*"0 /);
+  });
+
+  it("FeedCard row puts a StatusDot before the title (C11 replaces the old 16px headline test)", async () => {
+    const source = await readSource("src/components/for-you/FeedCard.tsx");
+    expect(source).toContain("<StatusDot status={KIND_STATUS[card.kind]}");
+    expect(source).not.toContain("font-headline text-[16px] font-bold");
+  });
+
   it("FeedCard title is text-sm font-medium with a muted one-line body preview", async () => {
     const source = await readSource("src/components/for-you/FeedCard.tsx");
     expect(source).toContain("truncate text-sm font-medium text-on-surface");

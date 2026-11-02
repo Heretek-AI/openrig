@@ -83,6 +83,7 @@ function ActivityRollupBar({ rigId }: { rigId: string }) {
 // the prior placeholder with the multi-rig single-canvas component
 // (rig-collapse affordance; default-all-collapsed; auto-expand on URL).
 import { HostMultiRigGraph } from "./HostMultiRigGraph.js";
+import { useRigStatusResolver } from "../../hooks/useRigStatusResolver.js";
 // OPR.0.4.0.1: one global LiveTerminalProvider per scope page bounds the total
 // live terminals across the page's graph + table + terminal tab-surfaces.
 import { LiveTerminalProvider, useTerminalCap } from "../terminal/LiveTerminalProvider.js";
@@ -373,6 +374,7 @@ export function RigScopePage() {
   const rigScopeActionsAllowed = hostSelectionKnown && hostSelectionLocal;
   const { rigId } = useParams({ from: "/topology/rig/$rigId" });
   const { data: rigs } = useRigSummary();
+  const rigStatus = useRigStatusResolver();
   const rig = rigs?.find((r) => r.id === rigId);
   const [active, setActive] = useState<TopologyRigPodScopeTab>("graph");
   const { isWideLayout } = useShellViewport();
@@ -391,7 +393,7 @@ export function RigScopePage() {
           title={rig?.name ?? rigId}
           meta={
             <>
-              <StatusBadge status={rig?.lifecycleState ?? "unknown"} testId="rig-lifecycle-badge" />
+              <StatusBadge status={rigStatus(rigId, rig?.lifecycleState)} testId="rig-lifecycle-badge" />
               <span className="font-mono text-xs text-on-surface-variant" data-testid="rig-id-mono">
                 {rigId}
               </span>

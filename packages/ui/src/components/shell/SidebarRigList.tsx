@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { StatusDot } from "../ui/status-badge.js";
 import { Skeleton } from "../ui/skeleton.js";
 import { useRigSummary } from "../../hooks/useRigSummary.js";
+import { useRigStatusResolver } from "../../hooks/useRigStatusResolver.js";
 
 export interface SidebarRigListProps {
   collapsed: boolean;
@@ -11,6 +12,7 @@ export interface SidebarRigListProps {
 
 export function SidebarRigList({ collapsed }: SidebarRigListProps) {
   const rigsQuery = useRigSummary();
+  const rigStatus = useRigStatusResolver();
   if (collapsed) return null;
   if (rigsQuery.isLoading) {
     return (
@@ -33,7 +35,7 @@ export function SidebarRigList({ collapsed }: SidebarRigListProps) {
           data-testid={`sidebar-rig-${rig.id}`}
           className="flex items-center gap-2 rounded-md px-3 py-1.5 pl-9 text-on-surface-variant hover:bg-surface-low hover:text-on-surface"
         >
-          <StatusDot status={rig.lifecycleState ?? "unknown"} />
+          <StatusDot status={rigStatus(rig.id, rig.lifecycleState)} />
           <span className="truncate text-sm">{rig.name}</span>
         </Link>
       ))}

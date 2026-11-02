@@ -7,6 +7,7 @@ import { allNavItems } from "../../lib/nav.js";
 import { useRigSummary } from "../../hooks/useRigSummary.js";
 import { useTheme } from "../ThemeProvider.js";
 import { StatusDot } from "../ui/status-badge.js";
+import { useRigStatusResolver } from "../../hooks/useRigStatusResolver.js";
 import { DialogTitle } from "../ui/dialog.js";
 
 const SEARCH_PLACEHOLDER = "Search pages, rigs, actions…";
@@ -24,6 +25,7 @@ export function CommandPalette(): React.JSX.Element {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const navigate = useNavigate();
   const rigsQuery = useRigSummary();
+  const rigStatus = useRigStatusResolver();
   const { resolved, setTheme } = useTheme();
 
   const go = useCallback(
@@ -90,7 +92,7 @@ export function CommandPalette(): React.JSX.Element {
                     onSelect={() => go("/topology/rig/$rigId", { rigId: rig.id })}
                   >
                     <span data-testid={`palette-rig-${rig.id}`}>
-                      <StatusDot status={rig.lifecycleState ?? "unknown"} />
+                      <StatusDot status={rigStatus(rig.id, rig.lifecycleState)} />
                       {rig.name}
                     </span>
                   </Command.Item>
