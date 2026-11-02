@@ -12,6 +12,7 @@ import {
   psEntries,
   specLibrary,
   nodeInventoryByRig,
+  attentionItems,
   rigGraphByRig,
   nodeDetailByKey,
   sessionPreviewByName,
@@ -44,6 +45,12 @@ const realFetch: typeof fetch | undefined = globalThis.fetch ? globalThis.fetch.
 function route(pathname: string, search: URLSearchParams): Response {
   if (pathname === "/api/rigs/summary") return json(rigSummary);
   if (pathname === "/api/ps") return json(psEntries);
+  // C10 Dashboard v2: attention (Needs you), daemon health, hosts, kernel, settings.
+  if (pathname === "/api/queue/attention-aggregate") return json(attentionItems);
+  if (pathname === "/api/queue/list") return json(attentionItems.items);
+  if (pathname === "/healthz") return json({ status: "ok" });
+  if (pathname === "/api/hosts") return json({ ownName: "localhost", selected: "local", hosts: [] });
+  if (pathname === "/api/kernel/status") return json({ error: "kernel_boot_tracker_unavailable", message: "twin" });
   // Settings (useSettings, staleTime:0). workspace.root unblocks the /project surface
   // (useWorkspaceName); preview settings keep the terminal pane consistent.
   if (pathname === "/api/config") {
