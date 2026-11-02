@@ -49,6 +49,7 @@ import { HostIndicator } from "./HostIndicator.js";
 import { useTheme } from "./ThemeProvider.js";
 import { Toaster } from "sonner";
 import { Sidebar } from "./shell/Sidebar.js";
+import { CommandPalette, PaletteShortcuts } from "./shell/CommandPalette.js";
 import { isSidebarCollapsed, readSidebarMode, writeSidebarMode } from "../lib/sidebar-mode.js";
 
 // =====================================================================
@@ -465,6 +466,10 @@ function AppShellInner({ children }: AppShellProps) {
 
               {/* C09: toasts for rig actions (sonner). Mounted once here. */}
               <Toaster position="bottom-right" richColors={false} closeButton theme={resolved} />
+
+              {/* C08: command palette + g-then-key shortcuts, mounted once here. */}
+              <CommandPalette />
+              <PaletteShortcuts />
 
               {/* ui-redesign C16 — mobile bottom nav lives in
                   components/shell/MobileBottomNav.tsx. "More" opens the
