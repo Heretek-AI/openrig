@@ -2,49 +2,9 @@
 // render with empty data. Cache seeded via setQueryData using the hooks'
 // exact keys (no fetch mocking).
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  createMemoryHistory,
-  RouterProvider,
-  Outlet,
-} from "@tanstack/react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
-import { Dashboard } from "../src/components/dashboard/Dashboard.js";
-
-function renderWithClient(seed: (qc: QueryClient) => void) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seed(qc);
-  const rootRoute = createRootRoute({
-    component: () => (
-      <QueryClientProvider client={qc}>
-        <Outlet />
-      </QueryClientProvider>
-    ),
-  });
-  const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: Dashboard });
-  const stub = (path: string) =>
-    createRoute({ getParentRoute: () => rootRoute, path, component: () => null });
-  const routeTree = rootRoute.addChildren([
-    indexRoute,
-    stub("/import"),
-    stub("/specs/rig"),
-    stub("/topology"),
-    stub("/topology/rig/$rigId"),
-    stub("/for-you"),
-    stub("/agents"),
-    stub("/settings/status"),
-  ]);
-  const router = createRouter({
-    routeTree,
-    history: createMemoryHistory({ initialEntries: ["/"] }),
-  });
-  render(<RouterProvider router={router as never} />);
-  return qc;
-}
+import { screen, cleanup, waitFor } from "@testing-library/react";
+import type { QueryClient } from "@tanstack/react-query";
+import { renderDashboard as renderWithClient } from "./helpers/dashboard-harness.js";
 
 const PS = [
   { rigId: "rig_alpha", name: "acme-build", nodeCount: 11, runningCount: 11, activeCount: 6, hasWorkCount: 3, status: "running", uptime: "4h 12m", latestSnapshot: "2025-09-01T01:40:00Z" },

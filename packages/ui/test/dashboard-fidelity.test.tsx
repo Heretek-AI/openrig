@@ -6,53 +6,14 @@
 // assert the new v2 sections; nothing is skipped or weakened.
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  createMemoryHistory,
-  RouterProvider,
-  Outlet,
-} from "@tanstack/react-router";
+import { screen, cleanup } from "@testing-library/react";
+import type { QueryClient } from "@tanstack/react-query";
 
 vi.mock("../src/components/mission-control/components/VerbActions.js", () => ({
   VerbActions: ({ qitemId }: { qitemId: string }) => <button type="button">Approve {qitemId}</button>,
 }));
 
-import { Dashboard } from "../src/components/dashboard/Dashboard.js";
-
-function renderDashboard(seed: (qc: QueryClient) => void) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seed(qc);
-  const rootRoute = createRootRoute({
-    component: () => (
-      <QueryClientProvider client={qc}>
-        <Outlet />
-      </QueryClientProvider>
-    ),
-  });
-  const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: Dashboard });
-  const stub = (path: string) =>
-    createRoute({ getParentRoute: () => rootRoute, path, component: () => null });
-  const routeTree = rootRoute.addChildren([
-    indexRoute,
-    stub("/import"),
-    stub("/specs/rig"),
-    stub("/topology"),
-    stub("/topology/rig/$rigId"),
-    stub("/for-you"),
-    stub("/agents"),
-    stub("/settings/status"),
-  ]);
-  const router = createRouter({
-    routeTree,
-    history: createMemoryHistory({ initialEntries: ["/"] }),
-  });
-  // Cast: the test stub tree differs from the app's generated route tree.
-  return render(<RouterProvider router={router as never} />);
-}
+import { renderDashboard } from "./helpers/dashboard-harness.js";
 
 function seedFull(qc: QueryClient) {
   qc.setQueryData(["hosts"], { ownName: "localhost", selected: "local", hosts: [] });
