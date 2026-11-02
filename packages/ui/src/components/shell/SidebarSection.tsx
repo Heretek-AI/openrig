@@ -33,34 +33,39 @@ export function SidebarSection({ id, label, collapsed, children }: SidebarSectio
   ) : null;
   const body = <>{children}</>;
 
+  // One shared group wrapper for both branches so the group markup isn't duplicated.
+  const group = (inner: React.ReactNode) => (
+    <div role="group" aria-label={label ?? undefined}>
+      {inner}
+    </div>
+  );
+
   if (!foldable) {
-    return (
-      <div role="group" aria-label={label ?? undefined}>
+    return group(
+      <>
         {heading}
         {body}
-      </div>
+      </>,
     );
   }
 
-  return (
+  return group(
     <Collapsible.Root open={!isFolded} onOpenChange={setOpen}>
-      <div role="group" aria-label={label ?? undefined}>
-        <Collapsible.Trigger
-          aria-label={`${isFolded ? "Expand" : "Collapse"} ${label} section`}
-          className={cn(
-            "w-full px-3 pt-4 pb-1 text-left text-xs font-medium text-on-surface-variant",
-            "hover:text-on-surface",
-          )}
-        >
-          <span className="flex w-full items-center justify-between">
-            {label}
-            <span aria-hidden="true" className="text-[10px] leading-none">
-              {isFolded ? "+" : "–"}
-            </span>
+      <Collapsible.Trigger
+        aria-label={`${isFolded ? "Expand" : "Collapse"} ${label} section`}
+        className={cn(
+          "w-full px-3 pt-4 pb-1 text-left text-xs font-medium text-on-surface-variant",
+          "hover:text-on-surface",
+        )}
+      >
+        <span className="flex w-full items-center justify-between">
+          {label}
+          <span aria-hidden="true" className="text-[10px] leading-none">
+            {isFolded ? "+" : "–"}
           </span>
-        </Collapsible.Trigger>
-        <Collapsible.Content>{body}</Collapsible.Content>
-      </div>
-    </Collapsible.Root>
+        </span>
+      </Collapsible.Trigger>
+      <Collapsible.Content>{body}</Collapsible.Content>
+    </Collapsible.Root>,
   );
 }

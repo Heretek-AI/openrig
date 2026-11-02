@@ -10,8 +10,7 @@ import { useAttentionItems } from "../../hooks/useAttentionItems.js";
 import { useFeedSubscriptions } from "../../hooks/useFeedSubscriptions.js";
 import { Button } from "../ui/button.js";
 import { Kbd } from "../ui/kbd.js";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip.js";
-import { SidebarNavItem } from "./SidebarNavItem.js";
+import { SidebarNavItem, CollapsedTooltip } from "./SidebarNavItem.js";
 import { SidebarSection } from "./SidebarSection.js";
 import { SidebarRigList } from "./SidebarRigList.js";
 
@@ -34,14 +33,7 @@ function NewRigButton({ collapsed }: { collapsed: boolean }) {
     </Button>
   );
   if (!collapsed) return button;
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>{button}</TooltipTrigger>
-        <TooltipContent side="right">New rig</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
+  return <CollapsedTooltip label="New rig">{button}</CollapsedTooltip>;
 }
 
 function SearchButton({ collapsed }: { collapsed: boolean }) {
@@ -65,14 +57,7 @@ function SearchButton({ collapsed }: { collapsed: boolean }) {
     </button>
   );
   if (!collapsed) return button;
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>{button}</TooltipTrigger>
-        <TooltipContent side="right">Search</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
+  return <CollapsedTooltip label="Search">{button}</CollapsedTooltip>;
 }
 
 export function Sidebar({

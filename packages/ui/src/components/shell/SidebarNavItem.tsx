@@ -13,6 +13,18 @@ export interface SidebarNavItemProps {
   onNavigate?: () => void;
 }
 
+/** Right-side label tooltip used for every collapsed sidebar control. */
+export function CollapsedTooltip({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        <TooltipContent side="right">{label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 export function SidebarNavItem({ item, pathname, collapsed, badge = 0, onNavigate }: SidebarNavItemProps) {
   const Icon = item.icon;
   const active = item.activeWhen(pathname);
@@ -48,12 +60,5 @@ export function SidebarNavItem({ item, pathname, collapsed, badge = 0, onNavigat
     </Link>
   );
   if (!collapsed) return link;
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>{link}</TooltipTrigger>
-        <TooltipContent side="right">{item.label}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
+  return <CollapsedTooltip label={item.label}>{link}</CollapsedTooltip>;
 }

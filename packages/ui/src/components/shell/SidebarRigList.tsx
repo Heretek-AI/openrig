@@ -15,9 +15,9 @@ export function SidebarRigList({ collapsed }: SidebarRigListProps) {
   if (rigsQuery.isLoading) {
     return (
       <div className="flex flex-col gap-1 pl-9 pr-3" aria-label="Loading rigs">
-        <Skeleton className="h-6 w-full" />
-        <Skeleton className="h-6 w-full" />
-        <Skeleton className="h-6 w-full" />
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-6 w-full" />
+        ))}
       </div>
     );
   }
