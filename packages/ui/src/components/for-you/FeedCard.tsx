@@ -252,7 +252,7 @@ function InlineDateMark({ value }: { value: string | undefined | null }) {
 
 function InlineActor({ session }: { session: string | undefined | null }) {
   return (
-    <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[10px] text-on-surface-variant">
+    <span className="inline-flex min-w-0 items-center gap-1 font-mono text-[11px] text-on-surface-variant">
       <ActorMark actor={session} size="xs" decorative />
       <span className="truncate">{compactSessionLabel(session)}</span>
     </span>
@@ -464,7 +464,7 @@ export function FeedCard({
             {card.hostId && card.hostId !== "local" ? (
               <span
                 data-testid="feed-card-host-chip"
-                className="border border-outline-variant px-1 font-mono text-[9px] text-on-surface-variant"
+                className="border border-outline-variant px-1 font-mono text-[11px] text-on-surface-variant"
               >
                 {card.hostId}
               </span>
@@ -560,7 +560,7 @@ export function FeedCard({
             ) : null}
           </div>
         ) : null}
-        <div className="flex items-center justify-between gap-3 font-mono text-[10px] text-on-surface-variant">
+        <div className="flex items-center justify-between gap-3 text-xs text-on-surface-variant">
           {!hideActions ? (
           <div
             {...(!(isActionableCard(card.kind, queueItem, renderedOutcome) && qitemViewerData)
@@ -580,7 +580,7 @@ export function FeedCard({
               <QueueItemTrigger
                 data={qitemViewerData}
                 testId={`feed-card-show-context-${card.id}`}
-                className="font-mono text-[10px] text-on-surface underline hover:text-on-surface"
+                className="text-xs text-on-surface underline hover:text-on-surface-variant"
               >
                 Show context
               </QueueItemTrigger>
@@ -597,7 +597,7 @@ export function FeedCard({
               <span
                 data-testid={`feed-card-evidence-${card.id}`}
                 title={card.evidenceRef}
-                className="max-w-48 truncate font-mono text-[10px] text-on-surface-variant"
+                className="max-w-48 truncate font-mono text-[11px] text-on-surface-variant"
               >
                 evidence: {card.evidenceRef}
               </span>
@@ -611,7 +611,7 @@ export function FeedCard({
                 params={{ sliceId: card.reviewSlice }}
                 hash={card.reviewAnchor ? `needs-you-${card.reviewAnchor}` : undefined}
                 data-testid={`feed-card-review-link-${card.id}`}
-                className="font-mono text-[10px] underline text-on-surface hover:text-on-surface-variant"
+                className="text-xs underline text-on-surface hover:text-on-surface-variant"
               >
                 review →
               </Link>

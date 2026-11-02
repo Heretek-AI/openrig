@@ -147,7 +147,7 @@ export function WorkflowInstancesBand({
 
   return (
     <div data-testid={testId ?? "workflow-instances-band"} className={touchedAltitude ? "space-y-2 text-sm" : "space-y-2"}>
-      <div className={touchedAltitude ? "text-xs text-on-surface-variant" : "font-mono text-[8px] uppercase tracking-[0.16em] text-on-surface-variant"}>
+      <div className={touchedAltitude ? "text-xs text-on-surface-variant" : "text-[11px] text-on-surface-variant"}>
         Instances
         <span className={touchedAltitude ? "ml-2" : "ml-2 normal-case tracking-normal"}>
           {rows.length} total · {live} live{exceptional > 0 ? ` · ${exceptional} need attention` : ""}

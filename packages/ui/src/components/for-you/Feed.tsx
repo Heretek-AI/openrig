@@ -473,7 +473,7 @@ export function Feed() {
           <div
             key={`status-${h.hostId}`}
             data-testid={`feed-host-status-${h.hostId}`}
-            className="mb-2 border border-outline-variant px-2 py-1 font-mono text-[9px] text-on-surface-variant"
+            className="mb-2 border border-outline-variant px-2 py-1 font-mono text-[11px] text-on-surface-variant"
           >
             {h.hostId}: {h.status}
             {h.error ? ` — ${h.error}` : ""} (other hosts&apos; items unaffected)

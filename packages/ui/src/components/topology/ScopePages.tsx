@@ -73,7 +73,7 @@ function ActivityRollupBar({ rigId }: { rigId: string }) {
   return (
     <div
       data-testid="activity-rollup-bar"
-      className="px-6 py-2 font-mono text-[10px] text-on-surface-variant border-b border-outline-variant bg-surface-lowest/30"
+      className="px-6 py-2 font-mono text-[11px] text-on-surface-variant border-b border-outline-variant bg-surface-lowest/30"
     >
       {formatRollupLabel(rollup)}
     </div>
@@ -228,13 +228,13 @@ export function HostScopePage() {
             data-testid="topology-remote-unreachable"
             className="max-w-2xl border-l-2 border-error bg-surface-low px-4 py-4 font-mono text-xs"
           >
-            <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-error">
+            <div className="mb-2 text-[11px] font-bold text-error">
               {selectedHost} is unreachable
             </div>
             <p className="mb-1 text-on-surface">
               The local daemon could not reach {selectedHost}&apos;s daemon. Its workspace can&apos;t be shown.
             </p>
-            <p className="mb-3 text-[10px] text-on-surface-variant">
+            <p className="mb-3 text-[11px] text-on-surface-variant">
               Check the host is up and paired (rig host ls), then retry. Other hosts are unaffected.
             </p>
             <div className="flex items-center gap-2">
@@ -242,7 +242,7 @@ export function HostScopePage() {
                 type="button"
                 data-testid="topology-remote-retry"
                 onClick={() => void refetch()}
-                className="border border-outline px-3 py-1 font-mono text-[10px] uppercase tracking-wide text-on-surface hover:bg-surface-low/60"
+                className="border border-outline px-3 py-1 text-[11px] text-on-surface hover:bg-surface-low/60"
               >
                 Retry
               </button>
@@ -250,7 +250,7 @@ export function HostScopePage() {
                 type="button"
                 data-testid="topology-remote-back-local"
                 onClick={() => selectHost.mutate({ hostId: LOCAL_HOST_ID })}
-                className="border border-outline-variant px-3 py-1 font-mono text-[10px] uppercase tracking-wide text-on-surface-variant hover:text-on-surface"
+                className="border border-outline-variant px-3 py-1 text-[11px] text-on-surface-variant hover:text-on-surface"
               >
                 Back to {ownName} (local)
               </button>
@@ -261,7 +261,7 @@ export function HostScopePage() {
       {remoteLoading ? (
         <div
           data-testid="topology-remote-loading"
-          className="mr-6 mt-3 border border-outline-variant bg-surface-low px-3 py-2 font-mono text-[10px] text-on-surface-variant"
+          className="mr-6 mt-3 border border-outline-variant bg-surface-low px-3 py-2 font-mono text-[11px] text-on-surface-variant"
           style={{ marginLeft: "calc(var(--header-anchor-offset, 0px) + 1.5rem)" }}
         >
           Pulling {selectedHost}&apos;s workspace over the network… showing the previous view until it arrives.
@@ -277,7 +277,7 @@ export function HostScopePage() {
           {!isWideLayout && active === "graph" ? (
             <p
               data-testid="topology-mobile-graph-degraded"
-              className="font-mono text-[9px] text-on-surface-variant italic mb-2"
+              className="font-mono text-[11px] text-on-surface-variant italic mb-2"
             >
               Graph view degrades to table on narrow viewports.
             </p>
@@ -427,7 +427,7 @@ export function RigScopePage() {
         >
           <div
             data-testid="rig-status-selection-pending"
-            className="font-mono text-[9px] uppercase tracking-wide text-on-surface-variant italic"
+            className="text-[11px] text-on-surface-variant italic"
           >
             resolving selected host…
           </div>
@@ -443,7 +443,7 @@ export function RigScopePage() {
           <div
             data-testid="rig-status-remote-readonly"
             data-remote-readonly="true"
-            className="font-mono text-[9px] uppercase tracking-wide text-on-surface-variant"
+            className="text-[11px] text-on-surface-variant"
           >
             read-only — remote host (launch/recovery is a local action)
           </div>
@@ -469,7 +469,7 @@ export function RigScopePage() {
           {!isWideLayout && active === "graph" ? (
             <p
               data-testid="topology-mobile-graph-degraded"
-              className="font-mono text-[9px] text-on-surface-variant italic mb-2"
+              className="font-mono text-[11px] text-on-surface-variant italic mb-2"
             >
               Graph view degrades to table on narrow viewports.
             </p>
@@ -493,7 +493,7 @@ export function RigOverviewTab({ rigId }: { rigId: string; rigName: string | nul
   const preview = useRigSpecReview(exported.hostSelection === "local" ? exported.data ?? null : null);
 
   if (exported.hostSelection === "loading" || (exported.hostSelection === "local" && exported.isLoading)) {
-    return <div className="p-6 font-mono text-[10px] text-on-surface-variant">Loading current rig spec…</div>;
+    return <div className="p-6 font-mono text-[11px] text-on-surface-variant">Loading current rig spec…</div>;
   }
   if (exported.hostSelection !== "local" || exported.isError || exported.data === undefined) {
     return (
@@ -513,14 +513,14 @@ export function RigOverviewTab({ rigId }: { rigId: string; rigName: string | nul
   }
   return (
     <div className="px-6 pb-6" data-testid="topology-rig-overview">
-      <p className="mb-3 font-mono text-[10px] text-on-surface-variant">
+      <p className="mb-3 font-mono text-[11px] text-on-surface-variant">
         Current rig configuration — exported from this instance, not the Specs library template.
       </p>
       {preview.data ? (
         <RigSpecDisplay review={preview.data} yaml={exported.data} testIdPrefix="topology-rig-overview-" />
       ) : (
         <>
-          <p className="mb-3 font-mono text-[10px] text-on-surface-variant">
+          <p className="mb-3 font-mono text-[11px] text-on-surface-variant">
             {preview.isError ? "Topology preview unavailable. The current export is shown below." : "Preparing topology preview…"}
           </p>
           <WorkflowCodePreview title="Current configuration" testId="topology-rig-overview-yaml">
@@ -561,7 +561,7 @@ export function PodScopePage() {
           {!isWideLayout && active === "graph" ? (
             <p
               data-testid="topology-mobile-graph-degraded"
-              className="font-mono text-[9px] text-on-surface-variant italic mb-2"
+              className="font-mono text-[11px] text-on-surface-variant italic mb-2"
             >
               Graph view degrades to table on narrow viewports.
             </p>

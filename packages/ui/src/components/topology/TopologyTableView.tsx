@@ -139,7 +139,7 @@ function CmuxButton({ row }: { row: AgentRow }) {
         <span
           data-testid={`topology-table-cmux-error-${row.logicalId}`}
           role="alert"
-          className="font-mono text-[9px] text-rose-700 max-w-[220px] leading-tight whitespace-normal break-words"
+          className="font-mono text-[11px] text-rose-700 max-w-[220px] leading-tight whitespace-normal break-words"
         >
           {errorMessage}
         </span>
@@ -317,7 +317,7 @@ function TopologyActionsCell({ row }: { row: AgentRow }) {
       <span
         data-testid={`topology-table-actions-${row.logicalId}`}
         data-remote-readonly="true"
-        className="font-mono text-[9px] uppercase tracking-wide text-on-surface-variant"
+        className="text-[11px] text-on-surface-variant"
       >
         read-only
       </span>
@@ -464,7 +464,7 @@ export function TopologyTableView({ rigIdScope, podNameScope }: { rigIdScope?: s
           className="max-w-xs"
           testId="topology-table-search"
         />
-        <span className="font-mono text-[10px] uppercase tracking-wide text-on-surface-variant ml-auto">
+        <span className="text-[11px] text-on-surface-variant ml-auto">
           {table.getFilteredRowModel().rows.length} of {activityData.length}
         </span>
       </div>
@@ -477,7 +477,7 @@ export function TopologyTableView({ rigIdScope, podNameScope }: { rigIdScope?: s
                   <th
                     key={h.id}
                     onClick={h.column.getToggleSortingHandler()}
-                    className="px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-on-surface-variant cursor-pointer select-none"
+                    className="px-3 py-2 text-[11px] text-on-surface-variant cursor-pointer select-none"
                   >
                     {flexRender(h.column.columnDef.header, h.getContext())}
                     {{ asc: " ↑", desc: " ↓" }[h.column.getIsSorted() as string] ?? null}

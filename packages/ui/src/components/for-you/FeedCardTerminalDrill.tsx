@@ -27,7 +27,7 @@ export function FeedCardTerminalDrill({ cardId, sessionName }: FeedCardTerminalD
         disabled
         data-testid={`feed-card-drill-${cardId}`}
         title="No session resolved for this card — live terminal unavailable"
-        className="inline-flex cursor-not-allowed items-center gap-1 font-mono text-[10px] text-on-surface-variant"
+        className="inline-flex cursor-not-allowed items-center gap-1 font-mono text-[11px] text-on-surface-variant"
       >
         Live terminal
       </button>
@@ -48,7 +48,7 @@ export function FeedCardTerminalDrill({ cardId, sessionName }: FeedCardTerminalD
         data-testid={`feed-card-drill-${cardId}`}
         onClick={openPreview}
         title={`Open live terminal for ${sessionName}`}
-        className="font-mono text-[10px] text-on-surface underline hover:text-on-surface"
+        className="text-xs text-on-surface underline hover:text-on-surface-variant"
       >
         Live terminal
       </button>

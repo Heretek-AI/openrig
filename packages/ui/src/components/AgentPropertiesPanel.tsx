@@ -28,7 +28,7 @@ function CopyButton({ text, testId }: { text: string; testId: string }) {
         if (timer.current) clearTimeout(timer.current);
         timer.current = setTimeout(() => setCopied(false), 1500);
       }}
-      className="ml-2 shrink-0 font-mono text-[10px] text-on-surface-variant underline decoration-dotted hover:text-on-surface"
+      className="ml-2 shrink-0 font-mono text-[11px] text-on-surface-variant underline decoration-dotted hover:text-on-surface"
     >
       {copied ? "Copied" : "Copy"}
     </button>
