@@ -186,8 +186,9 @@ describe("AppShell — Phase 2 chrome", () => {
       const topbar = container.querySelector("[data-testid='app-topbar']") as HTMLElement;
       expect(topbar).toBeTruthy();
       // Single source of truth — top bar is universal, NOT lg:hidden.
+      // C07 redesign: height is h-12.
       expect(topbar.className).not.toContain("lg:hidden");
-      expect(topbar.className).toContain("h-14");
+      expect(topbar.className).toContain("h-12");
     });
 
     it("brand link visible at desktop and links to / (Dashboard)", async () => {
@@ -195,7 +196,8 @@ describe("AppShell — Phase 2 chrome", () => {
       const brand = container.querySelector("[data-testid='brand-home-link']") as HTMLAnchorElement;
       expect(brand).toBeTruthy();
       expect(brand.getAttribute("href")).toBe("/");
-      expect(brand.textContent).toContain("OPENRIG");
+      // C07 redesign: sentence-case "OpenRig" wordmark in the sidebar header.
+      expect(brand.textContent).toContain("OpenRig");
     });
 
     it("right-slot carries the MH-2 host indicator (quiet local register, defaults to 'localhost')", async () => {

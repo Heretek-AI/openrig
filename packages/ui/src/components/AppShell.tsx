@@ -31,6 +31,8 @@ import {
 } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { MobileBottomNav } from "./shell/MobileBottomNav.js";
+import { Folder, Network, Sparkles } from "lucide-react";
+import { TopBar } from "./shell/TopBar.js";
 import { Explorer, shouldSuppressExplorerMount, type ExplorerSurface } from "./Explorer.js";
 import { SharedDetailDrawer, type DrawerSelection } from "./SharedDetailDrawer.js";
 import { PreviewStack } from "./preview/PreviewStack.js";
@@ -45,7 +47,6 @@ import { useActivityFeed } from "../hooks/useActivityFeed.js";
 import { useClearPlacementOnHostSwitch } from "../hooks/useHosts.js";
 import { useGlobalEvents } from "../hooks/useGlobalEvents.js";
 import { cn } from "../lib/utils.js";
-import { HostIndicator } from "./HostIndicator.js";
 import { useTheme } from "./ThemeProvider.js";
 import { Toaster } from "sonner";
 import { Sidebar } from "./shell/Sidebar.js";
@@ -298,9 +299,9 @@ function AppShellInner({ children }: AppShellProps) {
                 stay visible everywhere. */}
             <header
               data-testid="app-topbar"
-              className="h-14 flex items-center justify-between px-4 bg-background border-b border-outline-variant shrink-0 relative z-30"
+              className="h-12 flex items-center justify-between gap-3 px-4 bg-background border-b shrink-0 relative z-30"
             >
-              <div className="flex items-center gap-3">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
                 {/* Slice 26.E OPT-E Topology mobile toggle carve-out: at
                     narrow viewports on /topology the menu toggle does
                     not render. Clicking it flips explorerOpen state
@@ -323,32 +324,14 @@ function AppShellInner({ children }: AppShellProps) {
                     data-testid="mobile-menu-toggle"
                     onClick={() => setExplorerOpen((open) => !open)}
                     aria-label="Toggle navigation"
-                    className="flex flex-col gap-[3px] p-2 lg:hidden"
+                    className="flex flex-col gap-[3px] p-2 lg:hidden shrink-0"
                   >
                     <span className="block w-4 h-[1.5px] bg-inverse-surface" />
                     <span className="block w-4 h-[1.5px] bg-inverse-surface" />
                     <span className="block w-3 h-[1.5px] bg-inverse-surface" />
                   </button>
                 )}
-                <Link
-                  to="/"
-                  data-testid="brand-home-link"
-                  className="inline-flex items-center bg-inverse-surface px-3 py-1 font-mono text-sm font-bold uppercase tracking-[0.08em] text-background hover:bg-inverse-surface"
-                >
-                  OPENRIG
-                </Link>
-              </div>
-              {/* Right-slot — the V2 global affordance this slot was
-                  reserved for: the MH-2 which-host indicator (FR-3),
-                  truthful to the selected data source. Hidden on narrow
-                  viewports to preserve mobile space. */}
-              <div
-                data-testid="topbar-right-slot"
-                className="hidden sm:flex items-center gap-3"
-              >
-                <HostIndicator />
-                {/* OPR.0.4.3.29 — theme selector (placement founder-taste-gated). */}
-                <ThemeSelector />
+                <TopBar />
               </div>
             </header>
 
