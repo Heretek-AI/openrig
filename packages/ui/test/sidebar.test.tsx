@@ -35,9 +35,13 @@ describe("Sidebar shell (C06)", () => {
   });
 
   it("shows visible labels Inbox, Rigs, Projects, Library", async () => {
-    await renderAt("/");
+    const { container } = await renderAt("/");
+    const sidebar = container.querySelector("[data-testid='app-rail']") as HTMLElement;
     for (const label of ["Inbox", "Rigs", "Projects", "Library"]) {
-      expect(screen.getByText(label, { selector: ":not(.sr-only)" })).toBeTruthy();
+      const matches = Array.from(sidebar.querySelectorAll("span")).filter(
+        (el) => el.textContent === label && !el.classList.contains("sr-only"),
+      );
+      expect(matches.length, label).toBeGreaterThan(0);
     }
   });
 

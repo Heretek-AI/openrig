@@ -28,10 +28,9 @@ import {
   useState,
   createContext,
   useContext,
-  type ComponentType,
 } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Folder, Network, Sparkles } from "lucide-react";
+import { MobileBottomNav } from "./shell/MobileBottomNav.js";
 import { Explorer, shouldSuppressExplorerMount, type ExplorerSurface } from "./Explorer.js";
 import { SharedDetailDrawer, type DrawerSelection } from "./SharedDetailDrawer.js";
 import { PreviewStack } from "./preview/PreviewStack.js";
@@ -461,11 +460,10 @@ function AppShellInner({ children }: AppShellProps) {
                   drawer when drawer mounted. */}
               <PreviewStack />
 
-              {/* V1 attempt-3 Phase 5 P5-9 — Mobile bottom nav per
-                  universal-shell.md L135 + L144: For You / Project /
-                  Topology only (NOT Talk; Talk slots are V2 when web
-                  terminal ships). lg:hidden so desktop never sees it. */}
-              <MobileBottomNav pathname={pathname} />
+              {/* ui-redesign C16 — mobile bottom nav lives in
+                  components/shell/MobileBottomNav.tsx. "More" opens the
+                  same mobile tray as the hamburger. */}
+              <MobileBottomNav pathname={pathname} onMore={() => setExplorerOpen(true)} />
             </div>
           </div>
       </DiscoveryPlacementContext.Provider>
@@ -473,47 +471,4 @@ function AppShellInner({ children }: AppShellProps) {
   );
 }
 
-/** V1 mobile bottom nav per universal-shell.md L135 + L144 — 3 slots
- *  (For You / Project / Topology). Talk slots are V2 deferred (when web
- *  terminal ships). Rendered at lg:hidden so desktop never shows it. */
-function MobileBottomNav({ pathname }: { pathname: string }) {
-  const slots: Array<{
-    id: "for-you" | "project" | "topology";
-    label: string;
-    to: string;
-    activeWhen: (p: string) => boolean;
-    icon: ComponentType<{ className?: string; strokeWidth?: number | string }>;
-  }> = [
-    { id: "for-you", label: "For You", to: "/for-you", activeWhen: (p) => p.startsWith("/for-you"), icon: Sparkles },
-    { id: "project", label: "Project", to: "/project", activeWhen: (p) => p.startsWith("/project"), icon: Folder },
-    { id: "topology", label: "Topology", to: "/topology", activeWhen: (p) => p.startsWith("/topology") || p.startsWith("/rigs/"), icon: Network },
-  ];
-  return (
-    <nav
-      data-testid="mobile-bottom-nav"
-      aria-label="Mobile bottom navigation"
-      className="fixed bottom-0 left-0 right-0 z-40 lg:hidden vellum border-t border-outline-variant flex"
-    >
-      {slots.map((slot) => {
-        const active = slot.activeWhen(pathname);
-        return (
-          <Link
-            key={slot.id}
-            to={slot.to}
-            data-testid={`mobile-nav-${slot.id}`}
-            data-active={active}
-            className={cn(
-              "flex-1 flex flex-col items-center justify-center gap-0.5 py-2 font-mono text-[9px] uppercase tracking-wide",
-              active
-                ? "text-on-surface"
-                : "text-on-surface-variant hover:text-on-surface",
-            )}
-          >
-            <slot.icon className="h-5 w-5" strokeWidth={1.25} aria-hidden="true" />
-            <span>{slot.label}</span>
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
+/** C16 removed the inline MobileBottomNav (now components/shell/MobileBottomNav.tsx). */
