@@ -17,45 +17,15 @@
 //   peer to Topology / Project / Library / For-You). Only Dashboard
 //   remains surface=none (no Explorer).
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, cleanup, waitFor } from "@testing-library/react";
+import { describe, it, expect } from "vitest";
+import { render, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { createMockEventSourceClass } from "./helpers/mock-event-source.js";
 import { createAppTestRouter } from "./helpers/test-router.js";
+import { setupAppShellTestEnv } from "./helpers/app-shell-env.js";
 import { AppShell } from "../src/components/AppShell.js";
 
-const mockFetch = vi.fn();
-globalThis.fetch = mockFetch;
-
-let OriginalEventSource: typeof EventSource | undefined;
-
-beforeEach(async () => {
-  mockFetch.mockReset();
-  // Default rig/ps mocks return empty so chrome can render.
-  mockFetch.mockImplementation(async (url: string) => {
-    if (url.includes("/api/rigs/summary")) return new Response(JSON.stringify([]));
-    if (url.includes("/api/rigs/ps")) return new Response(JSON.stringify([]));
-    if (url.includes("/api/inventory")) return new Response(JSON.stringify([]));
-    return new Response("[]");
-  });
-  OriginalEventSource = globalThis.EventSource;
-  globalThis.EventSource = createMockEventSourceClass() as unknown as typeof EventSource;
-  const { queryClient } = await import("../src/lib/query-client.js");
-  queryClient.clear();
-});
-
-afterEach(() => {
-  if (OriginalEventSource) globalThis.EventSource = OriginalEventSource;
-  window.localStorage.clear();
-  cleanup();
-  Object.defineProperty(window, "innerWidth", {
-    configurable: true,
-    value: 1024,
-    writable: true,
-  });
-  window.dispatchEvent(new Event("resize"));
-});
+setupAppShellTestEnv();
 
 // Slice 52 (UI wall-clock hardening): the timed fixture no longer imports
 // ../src/routes.js. Mounting the whole route tree (all lazy page modules) was
