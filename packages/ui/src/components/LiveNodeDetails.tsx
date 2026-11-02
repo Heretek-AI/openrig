@@ -20,6 +20,8 @@ import { useTopologyActivity } from "../hooks/useTopologyActivity.js";
 import { useSpecLibrary, useLibraryReview } from "../hooks/useSpecLibrary.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { WorkflowHeader } from "./WorkflowScaffold.js";
+import { PageHeader } from "./ui/page-header.js";
+import { AgentPropertiesPanel } from "./AgentPropertiesPanel.js";
 import { AgentSpecDisplay } from "./AgentSpecDisplay.js";
 // Slice 3.3 fix-B — Plugins section per dispatch §3.2 / velocity-qa
 // VM verify failure #2. Reads plugin IDs from the agent spec review
@@ -36,7 +38,7 @@ import { SeatOverviewTable } from "./SeatOverviewTable.js";
 import { SeatOverviewSecondary } from "./SeatOverviewSecondary.js";
 import { SeatNotificationBanner } from "./SeatNotificationBanner.js";
 import { FileReferenceTrigger } from "./drawer-triggers/FileReferenceTrigger.js";
-import { displayPodName, inferPodName } from "../lib/display-name.js";
+import { displayAgentName, displayPodName, inferPodName } from "../lib/display-name.js";
 import { copyText } from "../lib/copy-text.js";
 import { useSelectedHostId } from "../hooks/useHosts.js";
 import { LOCAL_HOST_ID } from "../lib/host-param.js";
@@ -702,8 +704,17 @@ export function LiveNodeDetails({ rigId, logicalId }: LiveNodeDetailsProps) {
 
   return (
     <WorkspacePage>
-      <div data-testid="live-node-details" className="space-y-4">
-        <WorkflowHeader
+      <div className="flex gap-0">
+        <div data-testid="live-node-details" className="min-w-0 flex-1 space-y-4">
+          <PageHeader
+            title={displayAgentName(logicalId)}
+            meta={
+              data?.canonicalSessionName ? (
+                <span className="font-mono text-xs text-on-surface-variant">{data.canonicalSessionName}</span>
+              ) : undefined
+            }
+          />
+          <WorkflowHeader
           eyebrow="Live Node Details"
           title={data?.canonicalSessionName ?? logicalId}
           description={`${data?.rigName ?? rigId} / ${data?.podNamespace ?? inferPodName(logicalId) ?? displayPodName(data?.podId ?? null)} / ${logicalId}`}
@@ -737,6 +748,10 @@ export function LiveNodeDetails({ rigId, logicalId }: LiveNodeDetailsProps) {
             </div>
           </>
         )}
+        </div>
+        <div className="hidden lg:block">
+          <AgentPropertiesPanel rigId={rigId} logicalId={logicalId} />
+        </div>
       </div>
     </WorkspacePage>
   );
