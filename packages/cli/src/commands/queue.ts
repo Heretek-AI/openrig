@@ -356,6 +356,17 @@ function printResult(json: boolean, body: unknown, status: number): void {
   if (status >= 400) process.exitCode = status >= 500 ? 2 : 1;
 }
 
+// Priority is matched exactly where it matters (the founder view, attention ranks), so "Critical" would quietly file
+// the row as ordinary work. The daemon stores what it's given, so a documented value is normalized here. Other values
+// are kept as given: `high`, `normal` and `background` are in real use, and the mission view ranks some of them.
+const QUEUE_PRIORITIES = ["routine", "urgent", "critical"];
+function queuePriorityArg(value: string): string {
+  const lower = value.toLowerCase();
+  if (QUEUE_PRIORITIES.includes(lower)) return lower;
+  console.error(`Note: --priority '${value}' is outside the documented choices (${QUEUE_PRIORITIES.join(", ")}); keeping it as given.`);
+  return value;
+}
+
 /** #2276: the daemon's checks of a new row's human-facing fields (missing summary or evidence for a person,
  *  notification, questions, reply-to). The queue repository raises them before the row's first write, inside the
  *  create's transaction. A remote host's refusal arrives as remote_queue_write_failed instead, so it isn't one of these. */
@@ -639,6 +650,18 @@ async function printQueueItemResult(
 // IMPL-SPEC §2.3-2.4.
 const SHOW_BODY_PREVIEW_MAX_CODEPOINTS = 512;
 
+// A misspelled state ("in_progress") would otherwise read as an empty queue, not as a mistake: the list route matches
+// names as given. Each name is checked and trimmed the way the route trims it. This warns rather than refuses, so the
+// CLI's copy of the list doesn't stop it working with a newer daemon that knows more states.
+const QUEUE_STATE_NAMES = ["pending", "in-progress", "done", "blocked", "failed", "denied", "canceled", "handed-off"];
+function warnIfUnknownStates(value?: string): void {
+  const names = (value ?? "").split(",").map((name) => name.trim()).filter(Boolean);
+  const unknown = names.filter((name) => !QUEUE_STATE_NAMES.includes(name));
+  if (unknown.length === 0) return;
+  const effect = unknown.length === names.length ? " Nothing is filed under these names, so an empty result doesn't mean an empty queue." : "";
+  console.error(`Warning: unrecognized --state '${unknown.join("', '")}'. Supported states: ${QUEUE_STATE_NAMES.join(", ")}.${effect}`);
+}
+
 // Commander option parser. InvalidArgumentError (like positiveIntArg/enumArg) is what Commander
 // renders as its usual "option ... argument ... is invalid" error; a plain Error would escape parse.
 const WAKE_DURATION_FORMAT = "must be a positive integer with an optional s, m or h suffix (for example 90s, 15m, 168h)";
@@ -911,7 +934,7 @@ export function queueCommand(depsOverride?: QueueDeps): Command {
     .option("--mission <id>", "First-class mission scope; translated to a mission:<id> tag (composes with --tags)")
     .option("--slice <id>", "First-class slice scope; translated to a slice:<id> tag (composes with --tags)")
     .option("--gate <role>", "OPR.0.4.3.16: mark this as a gate qitem; translated to a gate:<role> tag (role e.g. guard | spec-review | pm-lead | qa | human). The idle-gate watchdog reads this predicate. Composes with --tags.")
-    .option("--priority <priority>", "Priority: routine | urgent | critical", "routine")
+    .option("--priority <priority>", "Priority: routine | urgent | critical", queuePriorityArg, "routine")
     .option("--tier <tier>", "Tier (e.g. fast, routine, deep, critical) — drives SLA")
     .option("--tags <tags>", "Comma-separated tags (composes with --mission and --slice)")
     .option("--expires-at <iso>", "ISO timestamp at which the qitem expires")
@@ -1385,7 +1408,7 @@ workspace home that is deferred/not-imminent belongs in its mission/slice.`)
     .option("--body <text>", "New qitem body inline (use - to read from stdin; mutually exclusive with --body-file). Omit both to keep the source body.")
     .option("--body-file <path>", "Read the new qitem body from a file path (use - for stdin; mutually exclusive with --body). Kills the backtick-shell-corruption class.")
     .option("--note <text>", "Transition note")
-    .option("--priority <priority>", "Override priority for the new qitem")
+    .option("--priority <priority>", "Override priority for the new qitem: routine | urgent | critical", queuePriorityArg)
     .option("--tier <tier>", "Override tier for the new qitem")
     .option("--tags <tags>", "Comma-separated tags for the new qitem")
     .option("--gate <role>", "OPR.0.4.3.16: mark the new qitem as gate work; translated to a gate:<role> tag (e.g. guard | spec-review). The idle-gate watchdog reads this predicate. Composes with --tags.")
@@ -1489,7 +1512,7 @@ workspace home that is deferred/not-imminent belongs in its mission/slice.`)
     .option("--body <text>", "New qitem body inline (use - to read from stdin; mutually exclusive with --body-file). Omit both to keep the source body.")
     .option("--body-file <path>", "Read the new qitem body from a file path (use - for stdin; mutually exclusive with --body). Kills the backtick-shell-corruption class.")
     .option("--note <text>", "Transition note")
-    .option("--priority <priority>", "Override priority for the new qitem")
+    .option("--priority <priority>", "Override priority for the new qitem: routine | urgent | critical", queuePriorityArg)
     .option("--tier <tier>", "Override tier for the new qitem")
     .option("--tags <tags>", "Comma-separated tags for the new qitem")
     .option("--gate <role>", "OPR.0.4.3.16: mark the new qitem as gate work; translated to a gate:<role> tag (e.g. guard | spec-review). The idle-gate watchdog reads this predicate. Composes with --tags.")
@@ -1772,6 +1795,7 @@ Examples:
       }
       if (opts.destination) params.set("destinationSession", opts.destination);
       if (opts.source) params.set("sourceSession", opts.source);
+      warnIfUnknownStates(opts.state);
       if (opts.state) params.set("state", opts.state);
       if (opts.targetRepo) params.set("targetRepo", opts.targetRepo);
       if (opts.limit) params.set("limit", String(opts.limit));
