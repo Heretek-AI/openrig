@@ -255,6 +255,43 @@ describe("AppShell — Phase 2 chrome", () => {
       expect(rail.className).not.toMatch(/\boverflow-x-auto\b/);
     });
 
+    // The mobile tray's sidebar must fill the tray. A fixed desktop width
+    // (var(--sidebar-width)) left an empty strip beside it that read as a
+    // second, older sidebar underneath.
+    it("mobile tray sidebar fills the tray (no fixed desktop width)", async () => {
+      const { container } = await renderAt("/", { innerWidth: 375 });
+      const tray = container.querySelector("[data-testid='mobile-rail-tray']") as HTMLElement;
+      const rail = tray.querySelector("[data-testid='app-rail']") as HTMLElement;
+      expect(rail.style.width).toBe("");
+      expect(rail.className).toMatch(/\bw-full\b/);
+      expect(tray.className).toContain("top-12");
+      // The rail must be allowed to shrink so its link list scrolls
+      // inside the tray instead of running under the bottom nav.
+      expect(rail.className).toMatch(/\bmin-h-0\b/);
+      expect(rail.className).not.toMatch(/\bshrink-0\b/);
+    });
+
+    // The hamburger opens only the nav tray. The Explorer panel (Inbox
+    // filters etc.) has its own top-bar button, so the two never stack.
+    it("mobile hamburger and Explorer toggle open separate drawers", async () => {
+      const { container } = await renderAt("/for-you", { innerWidth: 375 });
+      const tray = () => container.querySelector("[data-testid='mobile-rail-tray']") as HTMLElement;
+      const explorer = () => container.querySelector("[data-testid='explorer']") as HTMLElement;
+      const { fireEvent } = await import("@testing-library/react");
+      fireEvent.click(container.querySelector("[data-testid='mobile-menu-toggle']") as HTMLElement);
+      expect(tray().className).toContain("translate-x-0");
+      expect(tray().className).not.toContain("-translate-x-full");
+      expect(explorer().className).toContain("-translate-x-full");
+      const panelToggle = container.querySelector("[data-testid='mobile-explorer-toggle']") as HTMLElement;
+      expect(panelToggle.getAttribute("aria-label")).toBe("Show inbox filters");
+      fireEvent.click(panelToggle);
+      expect(tray().className).toContain("-translate-x-full");
+      expect(explorer().className).not.toContain("-translate-x-full");
+      expect(panelToggle.getAttribute("aria-label")).toBe("Hide inbox filters");
+      // A closed tray leaves the tab order.
+      expect(tray().hasAttribute("inert")).toBe(true);
+    });
+
     // C06 sidebar: nav items keep a >=44px tap target on mobile
     // (`h-11`) and a compact 36px row at lg: (`lg:h-9`). The icon is
     // centered when the sidebar is collapsed, so no width assertion.

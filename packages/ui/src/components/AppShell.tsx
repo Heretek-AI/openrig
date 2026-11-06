@@ -31,7 +31,7 @@ import {
 } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { MobileBottomNav } from "./shell/MobileBottomNav.js";
-import { Folder, Network, Sparkles } from "lucide-react";
+import { Folder, Network, PanelLeft, Sparkles } from "lucide-react";
 import { TopBar } from "./shell/TopBar.js";
 import { Explorer, shouldSuppressExplorerMount, type ExplorerSurface } from "./Explorer.js";
 import { SharedDetailDrawer, type DrawerSelection } from "./SharedDetailDrawer.js";
@@ -68,6 +68,19 @@ interface DiscoveryPlacementContextValue {
   placementTarget: DiscoveryPlacementTarget;
   setPlacementTarget: (target: DiscoveryPlacementTarget) => void;
   clearPlacement: () => void;
+}
+
+
+// Accessible names for the mobile button that toggles the Explorer panel.
+const MOBILE_EXPLORER_NOUN: Partial<Record<ExplorerSurface, string>> = {
+  "for-you": "inbox filters",
+  project: "project tree",
+  specs: "library",
+  settings: "settings sections",
+  topology: "rig tree",
+};
+function mobileExplorerLabel(surface: ExplorerSurface, open: boolean): string {
+  return `${open ? "Hide" : "Show"} ${MOBILE_EXPLORER_NOUN[surface] ?? "side panel"}`;
 }
 
 export const DrawerSelectionContext = createContext<DrawerSelectionContextValue>({
@@ -146,7 +159,12 @@ function AppShellInner({ children }: AppShellProps) {
   const surface = surfaceForPath(pathname);
   const { mode: explorerMode } = useTopologyOverlay();
 
-  const [explorerOpen, setExplorerOpen] = useState(false); // mobile slide-over state
+  const [explorerOpen, setExplorerOpen] = useState(false); // mobile nav tray state
+  // Mobile Explorer (Inbox filters, project tree, library, settings
+  // sections) has its own state. It used to share explorerOpen with the
+  // nav tray, so the hamburger opened both and the Explorer painted over
+  // the tray, leaving a nav you could see but not tap.
+  const [mobileExplorerOpen, setMobileExplorerOpen] = useState(false);
   const [desktopExplorerOpen, setDesktopExplorerOpen] = useState(true);
   const [isWideLayout, setIsWideLayout] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -165,6 +183,7 @@ function AppShellInner({ children }: AppShellProps) {
       setSelectionState(next);
       if (!isWideLayout && next) {
         setExplorerOpen(false);
+        setMobileExplorerOpen(false);
       }
     },
     [isWideLayout],
@@ -208,6 +227,7 @@ function AppShellInner({ children }: AppShellProps) {
     if (!isWideLayout) {
       setSelectionState(null);
       setExplorerOpen(false);
+      setMobileExplorerOpen(false);
     }
   }, [isWideLayout, pathname]);
 
@@ -322,7 +342,10 @@ function AppShellInner({ children }: AppShellProps) {
                   <button
                     type="button"
                     data-testid="mobile-menu-toggle"
-                    onClick={() => setExplorerOpen((open) => !open)}
+                    onClick={() => {
+                      setMobileExplorerOpen(false);
+                      setExplorerOpen((open) => !open);
+                    }}
                     aria-label="Toggle navigation"
                     className="flex flex-col gap-[3px] p-2 lg:hidden shrink-0"
                   >
@@ -333,6 +356,21 @@ function AppShellInner({ children }: AppShellProps) {
                 )}
                 <TopBar />
               </div>
+              {!isWideLayout && explorerMounted && (
+                <button
+                  type="button"
+                  data-testid="mobile-explorer-toggle"
+                  aria-label={mobileExplorerLabel(surface, mobileExplorerOpen)}
+                  aria-expanded={mobileExplorerOpen}
+                  onClick={() => {
+                    setExplorerOpen(false);
+                    setMobileExplorerOpen((open) => !open);
+                  }}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-low hover:text-on-surface lg:hidden"
+                >
+                  <PanelLeft className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                </button>
+              )}
             </header>
 
             {/* Main: rail + explore + center + drawer */}
@@ -356,17 +394,22 @@ function AppShellInner({ children }: AppShellProps) {
                   fails the SC-1 "exactly 2 left chromes" count check. */}
               {!isWideLayout && (
                 <>
-                  {explorerOpen && (
+                  {(explorerOpen || mobileExplorerOpen) && (
                     <div
-                      className="fixed inset-0 bg-black/20 z-20 lg:hidden"
-                      onClick={() => setExplorerOpen(false)}
+                      data-testid="mobile-drawer-backdrop"
+                      className="fixed inset-0 bg-black/50 z-20 lg:hidden"
+                      onClick={() => {
+                        setExplorerOpen(false);
+                        setMobileExplorerOpen(false);
+                      }}
                     />
                   )}
                   <div
                     data-testid="mobile-rail-tray"
+                    inert={!explorerOpen}
                     className={cn(
-                      "fixed top-14 left-0 bottom-0 z-30 bg-background border-r border-outline-variant transition-transform duration-200 ease-tactical lg:hidden",
-                      "w-72 max-w-[85vw] flex flex-col",
+                      "fixed top-12 left-0 bottom-0 z-30 bg-background transition-transform duration-200 ease-tactical lg:hidden",
+                      "w-72 max-w-[80vw] flex flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))]",
                       explorerOpen ? "translate-x-0" : "-translate-x-full",
                     )}
                   >
@@ -392,11 +435,11 @@ function AppShellInner({ children }: AppShellProps) {
                   on mobile (suppressTopologyMobileExplorer above). */}
               {explorerMounted && (
                 <Explorer
-                  open={explorerOpen}
-                  onClose={() => setExplorerOpen(false)}
+                  open={mobileExplorerOpen}
+                  onClose={() => setMobileExplorerOpen(false)}
                   selection={selectionState}
                   onSelect={setSelection}
-                  desktopMode={desktopExplorerOpen ? "full" : "hidden"}
+                  desktopMode={desktopExplorerOpen || !isWideLayout ? "full" : "hidden"}
                   surface={surface}
                   onDesktopToggle={() => setDesktopExplorerOpen((open) => !open)}
                   overlayMode={isTopologyOverlay ? "overlay" : "opaque"}
@@ -457,7 +500,10 @@ function AppShellInner({ children }: AppShellProps) {
               {/* ui-redesign C16 — mobile bottom nav lives in
                   components/shell/MobileBottomNav.tsx. "More" opens the
                   same mobile tray as the hamburger. */}
-              <MobileBottomNav pathname={pathname} onMore={() => setExplorerOpen(true)} />
+              <MobileBottomNav pathname={pathname} onMore={() => {
+                setMobileExplorerOpen(false);
+                setExplorerOpen(true);
+              }} />
             </div>
           </div>
       </DiscoveryPlacementContext.Provider>
