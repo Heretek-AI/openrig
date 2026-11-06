@@ -313,7 +313,7 @@ export function Explorer({
         aria-label="Expand explorer"
         onClick={onDesktopToggle}
         className={cn(
-          "hidden lg:flex fixed top-[5.5rem] left-[calc(var(--sidebar-current-width)+0.25rem)] z-30 h-8 w-8 items-center justify-center",
+          "hidden lg:flex absolute top-8 left-[calc(var(--sidebar-current-width)+0.25rem)] z-30 h-8 w-8 items-center justify-center",
           "rounded-full border border-outline-variant bg-background/90 text-on-surface",
           "shadow-[0_2px_8px_rgba(41,37,36,0.08)] backdrop-blur-sm transition-colors",
           "hover:bg-surface-low hover:text-on-surface",
@@ -330,6 +330,7 @@ export function Explorer({
       data-surface={surface}
       data-explorer-mode={overlayMode}
       data-explorer-collapsed="false"
+      tabIndex={-1}
       className={cn(
         // V1 border weight doctrine (universal-shell.md L39–L48):
         // 1px outline-variant ghost line for inter-region edges.
@@ -361,11 +362,11 @@ export function Explorer({
         isOverlay
           ? "vellum z-30 shadow-[6px_0_14px_rgba(46,52,46,0.06)]"
           : "z-40 bg-[hsl(var(--background)/0.035)] supports-[backdrop-filter]:bg-[hsl(var(--background)/0.018)] backdrop-blur-[14px] backdrop-saturate-75 shadow-[6px_0_14px_rgba(46,52,46,0.04)]",
-        // Mobile: slide-over from left below the 48px top bar (h-12).
-        // Opaque on phones: the desktop glass background let the page
-        // underneath bleed through the panel.
+        // Mobile: slide-over within the shell content, below the notice and
+        // header. Opaque on phones: the desktop glass background let the
+        // page underneath bleed through the panel.
         !isOverlay && "max-lg:!bg-background",
-        "fixed top-12 bottom-0 left-0 transition-transform duration-200 ease-tactical w-72 max-w-[80vw]",
+        "absolute top-0 bottom-0 left-0 transition-transform duration-200 ease-tactical w-72 max-w-[80vw]",
         open ? "translate-x-0" : "-translate-x-full",
         // Desktop (>=lg): persistent column at 280px (lg:w-72) per
         // universal-shell.md L34. Positioned absolutely after the sidebar
@@ -374,7 +375,10 @@ export function Explorer({
         "lg:absolute lg:top-0 lg:bottom-0 lg:left-[var(--sidebar-current-width)] lg:w-72 lg:max-w-none lg:translate-x-0",
       )}
     >
-      <div className="relative flex h-full w-full flex-col">
+      {/* F12 (#2417): narrow-viewport bottom padding keeps the last rows
+          above the fixed MobileBottomNav (h-14 + safe-area). Desktop (lg:)
+          keeps zero bottom padding. */}
+      <div className="relative flex h-full w-full flex-col pb-[calc(env(safe-area-inset-bottom)+3.5rem)] lg:pb-0">
         <button
           type="button"
           data-testid="explorer-edge-toggle"

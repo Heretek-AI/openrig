@@ -12,6 +12,7 @@ import { QueueTransitionLog, type OwnerNotificationLevel, type QueueTransition, 
 import { WAKE_INTENT_PREFIX, type OutboxHandler, type OutboxEntry } from "./outbox-handler.js";
 import type { QueueWakeFacts } from "./draft-aware-delivery.js";
 import { derivePickup, type PickupReceipt } from "./queue-pickup.js";
+import { withRecoveryIndex } from "./queue-recovery.js";
 import { lastMeaningfulTransition, readWaitingView, type WaitingView, type WaitingActivityReader } from "./queue-waiting.js";
 import { isOpenRigSender, OPENRIG_SENDER, wrapPaneEnvelope } from "../lib/pane-envelope.js";
 import { isBoundTerminalSeat } from "./terminal-seat.js";
@@ -39,13 +40,16 @@ import {
 } from "./queue-wake-repository.js";
 import { WatchdogJobsRepository } from "./watchdog-jobs-repository.js";
 import { armQueueWait, backOffQueueWait, refreshQueueWaits, evaluateQueueWait, retargetQueueWait, isQueueWait } from "./queue-wait-backoff.js";
-import { parseHumanQuestions, unansweredQuestions, describeTypedReplyPlacement, type HumanQuestion, type HumanAnswers, type TypedHumanReply, type RecordHumanAnswerResult } from "./human-questions.js";
+import { parseHumanQuestions, unansweredQuestions, describeTypedReplyPlacement, formatHumanAnswers, humanAnswerText, type HumanQuestion, type HumanAnswers, type TypedHumanReply, type RecordHumanAnswerResult } from "./human-questions.js";
 import { slackMicros } from "./gateway/slack/state-store.js";
 
 /** A direct ask's answer row ID: from the ask, or from the ask and the park episode its answer belongs to. */
 function humanAnswerId(askId: string, episodeKey?: string): string {
   return `qitem-human-answer-${createHash("sha256").update(episodeKey ? `${askId}\n${episodeKey}` : askId).digest("hex").slice(0, 20)}`;
 }
+
+/** A row's nudge result when its wake couldn't be staged: the row stands, and its wake is owed. */
+const WAKE_NOT_RETAINED = "failed:wake not retained: ";
 
 export const QUEUE_STATES = [
   "pending",
@@ -117,6 +121,9 @@ const FALLBACK_ACTOR = "system:queue-fallback";
  *  external condition that is NOT a qitem and NOT a human seat; these prefixes make such a gate a
  *  first-class, compact-visible, downstream-classifiable blocker (the ruling detail rides a transition). */
 export const TYPED_GATE_BLOCKER_PREFIXES = ["fold:", "auth:", "external:"] as const;
+
+/** The actor a terminal act is recorded as when it names no responder: explicitly unattributed, never a person. */
+export const UNATTRIBUTED_ACTOR = "human@host";
 export function typedGateBlockerPrefix(value: string): string | null {
   return TYPED_GATE_BLOCKER_PREFIXES.find((p) => value.startsWith(p)) ?? null;
 }
@@ -411,6 +418,8 @@ export interface QueueUpdateInput {
   qitemId: string;
   actorSession: string;
   state?: QueueState;
+  /** The actor accepts this revised closure deadline without replacing the claim. */
+  closureRequiredAt?: string;
   /** Explicit acknowledgment for a deliberate terminal → active repair. */
   reopen?: boolean;
   /**
@@ -1073,6 +1082,13 @@ export class QueueRepository {
     refreshQueueWaits(this.db, this.watchdogJobsRepo ?? new WatchdogJobsRepository(this.db), changedQitem, proofChanged);
   }
 
+  /** Observe committed queue changes; callbacks should schedule work, not perform it inline. */
+  subscribeChanges(onChange: (qitemId: string) => void): () => void {
+    return this.eventBus.subscribe((event) => {
+      if (event.type.startsWith("queue.") && "qitemId" in event && typeof event.qitemId === "string") onChange(event.qitemId);
+    });
+  }
+
   startWaitReminders(): () => void {
     this.reconcileWaitReminders();
     return this.eventBus.subscribe((event) => {
@@ -1252,6 +1268,19 @@ export class QueueRepository {
     });
   }
 
+  /** A handoff's wake, staged as create stages one: a recipient whose held-message quota is full still gets the row,
+   *  which records its wake as not retained, so work keeps moving between other seats (#2430). Any other staging
+   *  failure rolls the act back. Every close-and-successor writer (queue handoffs, mission control, workflow steps)
+   *  stages through it. */
+  stageHandoffWake(successorQitemId: string, fromSession: string, toSession: string, identityProvenance: string | null, nudge: boolean | undefined): void {
+    try {
+      this.db.transaction(() => this.stageWakeIntent(successorQitemId, fromSession, toSession, identityProvenance, nudge))();
+    } catch (err) {
+      if ((err as { code?: string }).code !== "retained_quota_full") throw err;
+      this.recordNudgeAttempt(successorQitemId, `${WAKE_NOT_RETAINED}${(err as Error).message}`);
+    }
+  }
+
   private recordWakeIntent(input: {
     outboxId: string;
     auditPointer: string;
@@ -1358,7 +1387,8 @@ export class QueueRepository {
     const src = this.getById(sourceQitemId);
     if (!src || !isTerminalState(src.state)) return; // not a terminal close
     const intent = this.outbox.getById(`${WAKE_INTENT_PREFIX}${successorQitemId}`);
-    if (!intent) {
+    // A successor whose wake a full held-message quota refused records that instead, and stands (#2430).
+    if (!intent && !this.getById(successorQitemId)?.lastNudgeResult?.startsWith(WAKE_NOT_RETAINED)) {
       throw new QueueRepositoryError(
         "terminal_close_without_wake_intent",
         `terminal closure of ${sourceQitemId} committed without staging its wake intent for ${successorQitemId} — one act or none is violated`,
@@ -1850,6 +1880,9 @@ export class QueueRepository {
     const qitemId = humanAnswerId(input.inboundReplyTo, episodeKey);
     const existing = episodeKey ? this.getById(qitemId) : this.getHumanAnswer(input.inboundReplyTo, input.sourceSession);
     if (existing) return existing;
+    // One reply per ask: another person's answer already returned is the answer, so it comes back, and the caller says so.
+    const answered = this.getById(qitemId);
+    if (answered) return answered;
     return this.create({ ...create, qitemId, tags: [...new Set([...(input.tags ?? []), "human-answer"])] });
   }
 
@@ -1898,7 +1931,7 @@ export class QueueRepository {
           this.db.transaction(() => this.stageWakeIntent(created.qitemId, wakeFrom, input.destinationSession, sideEffectProvenance(input.identityProvenance), input.nudge, input.wakeTrigger))();
           wakeStaged = true;
         } catch (err) {
-          this.recordNudgeAttempt(created.qitemId, `failed:wake not retained: ${err instanceof Error ? err.message : String(err)}`);
+          this.recordNudgeAttempt(created.qitemId, `${WAKE_NOT_RETAINED}${err instanceof Error ? err.message : String(err)}`);
         }
       }
       return created;
@@ -2171,11 +2204,11 @@ export class QueueRepository {
     return registry.ok && resolveRegisteredHumanAddress(destination, registry.entities) !== null;
   }
 
-  /** Who may answer an ask: the asked person; and on a runner's permission request, any registered person, since a
-   *  person's yes counts however it arrives there. A shared channel never answers. */
+  /** Who may answer an ask: the asked person, and any other registered person in this workspace, who's recorded as
+   *  themselves with the asked person kept (one trusted workspace, equal authority). A shared channel never answers. */
   answersAsk(item: QueueItem, actorSession: string): boolean {
     if (item.destinationSession === actorSession) return true;
-    if (!runnerPermissionOrigin(item) || this.isSharedChannel(actorSession)) return false;
+    if (this.isSharedChannel(actorSession)) return false;
     const registry = this.loadHumanRegistryFn();
     return registry.ok && resolveRegisteredHumanAddress(actorSession, registry.entities) !== null;
   }
@@ -2190,8 +2223,8 @@ export class QueueRepository {
     return this.loadHumanRegistryFn();
   }
 
-  /** The asked person, when a different registered person is acting on what was asked of them; else null. An agent, the
-   *  asked person under another spelling, and an ask to no registered person aren't someone else. */
+  /** The asked person, when a different registered person is acting on what was asked of them, so the record names both;
+   *  else null. An agent, the asked person under another spelling, and an ask to no registered person aren't someone else. */
   askedSomeoneElse(actorSession: string, askedSession: string | null | undefined): string | null {
     const registry = this.loadHumanRegistryFn();
     if (!registry.ok) return null;
@@ -2334,8 +2367,9 @@ export class QueueRepository {
 
       // W1-a: the durable wake intent joins the SAME transaction as the close +
       // successor create. If this (or anything above) throws, the whole act rolls
-      // back — one act or none.
-      this.stageWakeIntent(newId, input.fromSession, input.toSession, sideEffectProvenance(input.identityProvenance), input.nudge);
+      // back — one act or none. A recipient's full held-message quota is the one
+      // exception: the successor records its wake as not retained (#2430).
+      this.stageHandoffWake(newId, input.fromSession, input.toSession, sideEffectProvenance(input.identityProvenance), input.nudge);
 
       const handoffEvent = this.eventBus.persistWithinTransaction({
         type: "queue.handed_off",
@@ -2511,8 +2545,8 @@ export class QueueRepository {
       });
 
       // W1-a: the durable wake intent joins the SAME transaction as the close +
-      // successor create — one act or none (symmetric with handoff()).
-      this.stageWakeIntent(newId, input.fromSession, input.toSession, sideEffectProvenance(input.identityProvenance), input.nudge);
+      // successor create — one act or none (symmetric with handoff(), including its full-quota exception).
+      this.stageHandoffWake(newId, input.fromSession, input.toSession, sideEffectProvenance(input.identityProvenance), input.nudge);
 
       const handoffEvent = this.eventBus.persistWithinTransaction({
         type: "queue.handed_off",
@@ -2981,15 +3015,28 @@ export class QueueRepository {
         `qitem ${input.qitemId} not found`
       );
     }
+    const hasReestimate = input.closureRequiredAt !== undefined;
+    let closureRequiredAt: string | undefined;
+    if (hasReestimate) {
+      if (qitem.state !== "in-progress" || (input.state !== undefined && input.state !== "in-progress")) {
+        throw new QueueRepositoryError("qitem_not_in_progress", "a revised closure deadline updates an in-progress item without changing its state; nothing was written");
+      }
+      const deadline = typeof input.closureRequiredAt === "string" ? Date.parse(input.closureRequiredAt) : NaN;
+      if (!Number.isFinite(deadline)) {
+        throw new QueueRepositoryError("note_append_fields_not_admitted", "--closure-required-at needs a valid timestamp; nothing was written");
+      }
+      closureRequiredAt = new Date(deadline).toISOString();
+    }
     const hasNote = typeof input.transitionNote === "string" && input.transitionNote.trim().length > 0;
     const hasValidSummary = typeof input.summary === "string" && input.summary.trim().length > 0;
     const isGuardedTerminal = (["done", "canceled", "handed-off"] as const).includes(
       qitem.state as "done" | "canceled" | "handed-off",
     );
-    const isStatePreservingAppend = input.state === undefined || (isGuardedTerminal && input.state === qitem.state);
+    const isStatePreservingAppend = input.state === undefined || (isGuardedTerminal && input.state === qitem.state)
+      || (hasReestimate && input.state === qitem.state);
 
     if (isStatePreservingAppend) {
-      if (input.state === undefined && !hasNote && !hasValidSummary) {
+      if (input.state === undefined && !hasNote && !hasValidSummary && !hasReestimate) {
         throw new QueueRepositoryError(
           "state_or_note_required",
           "queue update requires --state, a non-empty --note, or a non-empty --summary; nothing was written",
@@ -3032,11 +3079,17 @@ export class QueueRepository {
         this.persistSummary(input.qitemId, input.summary!);
       }
 
-      const note = hasValidSummary
+      let note = hasValidSummary
         ? (hasNote
           ? (input.transitionNote!.includes("(summary updated)") ? input.transitionNote : `${input.transitionNote} (summary updated)`)
           : "summary updated")
         : input.transitionNote;
+
+      if (hasReestimate) {
+        this.db.prepare("UPDATE queue_items SET closure_required_at = ? WHERE qitem_id = ?").run(closureRequiredAt!, input.qitemId);
+        const receipt = `closure deadline re-estimated: ${qitem.closureRequiredAt ?? "(none)"} -> ${closureRequiredAt}; accepted by ${input.actorSession}`;
+        note = hasNote || hasValidSummary ? `${note}\n${receipt}` : receipt;
+      }
 
       this.transitionLog.append({
         qitemId: input.qitemId,
@@ -3704,7 +3757,7 @@ export class QueueRepository {
   /** Called by the watchdog engine after the delivery attempt is durably
    *  audited. The queue transition records that attempt independently of
    *  whether the HELD row's owner consumed it. */
-  recordWatchdogWakeAttempt(jobId: string, deliveryStatus: string): void {
+  recordWatchdogWakeAttempt(jobId: string, deliveryStatus: string, retryAt?: string): void {
     const bindings = this.wakeRepo.findBlockedQitemsByWatchdog(jobId);
     if (bindings.length === 0) return;
     // Both receipt ownership and timer lifecycle follow the current park.
@@ -3714,11 +3767,11 @@ export class QueueRepository {
         qitemId,
         state: "blocked",
         actorSession: "watchdog@system",
-        transitionNote: deliveryStatus === "retained"
+        transitionNote: retryAt ? `park wake failed: watchdog ${jobId}; delivery=${deliveryStatus}; occurrence remains owed; retry at ${retryAt}` : deliveryStatus === "retained"
           ? `park wake retained: watchdog ${jobId}; not delivered; blocked work unchanged`
           : `park wake fired: watchdog ${jobId}; delivery=${deliveryStatus}; awaiting owner consumption`,
       });
-      this.wakeRepo.record({
+      if (!retryAt) this.wakeRepo.record({
         transitionId: transition.transitionId,
         qitemId,
         phase: "fired",
@@ -3751,7 +3804,7 @@ export class QueueRepository {
     const parkGeneratedTimer = this.wakeRepo.findCurrentQitemsByGeneratedTimer(jobId).length > 0;
     const events = this.db.transaction(() => {
       const firedEvents = targets.map(recordFired);
-      if (deliveryStatus === "retained") return firedEvents;
+      if (retryAt || deliveryStatus === "retained") return firedEvents;
       if (usageLimitBlockers.length === 0) {
         const jobsRepo = this.watchdogJobsRepo ?? new WatchdogJobsRepository(this.db);
         if (parkGeneratedTimer && !backOffQueueWait(jobsRepo, jobId, deliveryStatus)) {
@@ -3787,7 +3840,9 @@ export class QueueRepository {
       );
       return [...firedEvents, ...resolutionEvents];
     })();
-    for (const event of events) this.eventBus.notifySubscribers(event);
+    for (const event of events) {
+      if (!this.eventBus.registerPersistedWithinActiveEnvelope(event)) this.eventBus.notifySubscribers(event);
+    }
   }
 
   /** Close a direct human request and retain its typed answer in the same transaction.
@@ -3796,29 +3851,56 @@ export class QueueRepository {
    * button set is already final; its resolve continuation must not overwrite those answers.
    */
   resolveDirectHumanReply(input: { qitemId: string; actorSession: string; decision: string; primaryUser?: boolean }): boolean {
+    let mine = true;
     const result = this.db.transaction(() => {
       const item = this.getById(input.qitemId);
       if (item?.state !== "pending" || item.humanIntent === "update"
         || (!this.answersAsk(item, input.actorSession) && !input.primaryUser)
         || !this.isPersonAddress(item.destinationSession)) return null;
-
-      let transitionNote = item.destinationSession === input.actorSession ? "direct human reply received"
-        : input.primaryUser ? `reply from ${input.actorSession}, the primary user at the terminal, on ${item.destinationSession}'s ask; not answered by ${item.destinationSession}`
-        : `reply from ${input.actorSession}, a registered person, on the runner permission request asked of ${item.destinationSession}`;
-      const placed = this.placeTypedReply(item, input.decision);
-      if (placed) transitionNote += `; ${placed}`;
-      return this.updateInTransactionalContext({
-        qitemId: input.qitemId,
-        actorSession: input.actorSession,
-        state: "done",
-        closureReason: "no-follow-on",
-        transitionNote,
-        ownerNotificationKind: "human-decision-resolved",
-      });
+      // One answer per ask: another person's committed return is the answer, so the ask closes as theirs, with their words,
+      // and this caller's don't settle it (false tells the caller so).
+      const winner = this.committedAnswerFromAnother(item.qitemId, input.actorSession);
+      if (winner) {
+        mine = false;
+        const questions = item.humanQuestions ?? [];
+        const decision = questions.length && unansweredQuestions(questions, item.humanAnswers ?? {}).length === 0
+          ? formatHumanAnswers(questions, item.humanAnswers ?? {}).join("; ") : humanAnswerText(winner.body);
+        return this.closeDirectAsk(item, winner.sourceSession, decision, !this.answersAsk(item, winner.sourceSession));
+      }
+      return this.closeDirectAsk(item, input.actorSession, input.decision, input.primaryUser === true);
     })();
     if (!result) return false;
     for (const event of result.persistedEvents) this.eventBus.notifySubscribers(event);
-    return true;
+    return mine;
+  }
+
+  /** Another person's committed return to this ask: its shared reply (for a park's question, `episodeKey`'s). It's the
+   *  answer, so a different person's later attempt settles with it rather than their own. Null when there's none, or it's
+   *  this actor's. */
+  committedAnswerFromAnother(qitemId: string, actorSession: string, episodeKey?: string): QueueItem | null {
+    const row = this.getById(humanAnswerId(qitemId, episodeKey));
+    return row && row.replyTo === qitemId && row.sourceSession !== actorSession ? row : null;
+  }
+
+  /** Close a pending direct ask as `actor`, its typed words under the first unanswered question. Inside a transaction. */
+  private closeDirectAsk(item: QueueItem, actor: string, decision: string, primaryUser: boolean) {
+    const asked = item.destinationSession;
+    let transitionNote = asked === actor ? "direct human reply received"
+      : primaryUser && actor === UNATTRIBUTED_ACTOR
+        ? `reply from someone at the terminal OpenRig can't name (${UNATTRIBUTED_ACTOR}), unattributed, on ${asked}'s ask; not answered by ${asked}`
+      : primaryUser ? `reply from ${actor}, the primary user at the terminal, on ${asked}'s ask; not answered by ${asked}`
+      : runnerPermissionOrigin(item) ? `reply from ${actor}, a registered person, on the runner permission request asked of ${asked}`
+      : `reply from ${actor}, a registered person, on ${asked}'s ask; not answered by ${asked}`;
+    const placed = this.placeTypedReply(item, decision);
+    if (placed) transitionNote += `; ${placed}`;
+    return this.updateInTransactionalContext({
+      qitemId: item.qitemId,
+      actorSession: actor,
+      state: "done",
+      closureReason: "no-follow-on",
+      transitionNote,
+      ownerNotificationKind: "human-decision-resolved",
+    });
   }
 
   /** Store a typed reply under the first unanswered question, keeping earlier clicks; the placement note, or null. */
@@ -3857,7 +3939,7 @@ export class QueueRepository {
     clickedTs?: string }): RecordHumanAnswerResult {
     if (!this.hasHumanQuestionsColumn) return { status: "not-applicable", reason: "schema" };
     if (this.closeStaleRunnerPermission(input.qitemId)) return { status: "not-applicable", reason: "state-canceled" };
-    return this.db.transaction(() => {
+    const result = this.db.transaction((): RecordHumanAnswerResult => {
       const item = this.getById(input.qitemId);
       if (!item?.humanQuestions?.length) return { status: "not-applicable" as const, reason: "no-questions" };
       if (item.state !== "pending" && !this.answersPark(item, input.actorSession, input.clickedTs)) {
@@ -3870,10 +3952,18 @@ export class QueueRepository {
           ...(decidedForThem ? { decidedForThem } : {}) };
       }
       if (!this.answersAsk(item, input.actorSession) && !input.primaryUser) return { status: "not-applicable" as const, reason: "not-the-asked-human" };
+      // One answer per question: another person's committed return is the answer (a park's, for its current question), so
+      // nothing of this person's is recorded.
+      const episodeKey = item.state === "pending" ? undefined : this.currentHumanRequiredEpisode(item.qitemId)?.key;
+      const winner = item.state === "pending" || episodeKey ? this.committedAnswerFromAnother(item.qitemId, input.actorSession, episodeKey) : null;
+      if (winner) return { status: "not-applicable" as const, reason: "answered", answeredBy: winner.sourceSession };
       const question = item.humanQuestions.find((q) => q.id === input.questionId);
       if (!question?.options.some((o) => o.id === input.optionId)) return { status: "not-applicable" as const, reason: "unknown-option" };
       const recorded = item.humanAnswers ?? {};
-      if (unansweredQuestions(item.humanQuestions, recorded).length === 0) {
+      // A park's set is final once this park has its answer: until then a complete set is an earlier park's, and a click
+      // on the re-park records over it.
+      if (unansweredQuestions(item.humanQuestions, recorded).length === 0
+        && (item.state === "pending" || this.currentEpisodeAnswer(item.qitemId, input.actorSession))) {
         return { status: "recorded" as const, answers: recorded, complete: true, questions: item.humanQuestions };
       }
       const answers: HumanAnswers = { ...(item.humanAnswers ?? {}), [input.questionId]: input.optionId };
@@ -3881,19 +3971,43 @@ export class QueueRepository {
       const complete = unansweredQuestions(item.humanQuestions, answers).length === 0;
       return { status: "recorded" as const, answers, complete, questions: item.humanQuestions };
     })();
+    // A pending ask's interrupted close finishes here, as theirs; a park resumes with it through the reply resolver.
+    if (result.status === "not-applicable" && result.answeredBy) {
+      this.resolveDirectHumanReply({ qitemId: input.qitemId, actorSession: input.actorSession, decision: "", primaryUser: input.primaryUser });
+    }
+    return result;
   }
 
-  /** A decision parked on the person it asked takes that person's click or typed reply as its answer (makeHumanReplyResolver
-   *  resumes it): the park is on them by any of their addresses, and the answer came after its current question posted. */
+  /** A decision parked on the person it asked takes their click or typed reply, or another registered person's, as its
+   *  answer (makeHumanReplyResolver resumes it): the park is on a person, and the answer came after its current question
+   *  posted. */
   answersPark(item: QueueItem, actorSession: string, answeredTs: string | undefined): boolean {
     if (item.state !== "blocked" || !item.blockedOn || !this.isPersonAddress(item.blockedOn)) return false;
-    if (item.destinationSession !== actorSession || this.askedSomeoneElse(actorSession, item.blockedOn)) return false;
+    if (!this.isPersonAddress(item.destinationSession) || !this.answersAsk(item, actorSession)) return false;
     const posted = slackMicros(this.currentHumanRequiredEpisode(item.qitemId)?.receipt?.messageTs);
     const answered = slackMicros(answeredTs);
     return posted !== null && answered !== null && answered > posted;
   }
 
   /** A park's current question: its latest human-required transition, and that notification's final post receipt, if any. */
+  /** The opaque revision of what a person decides on (#2446): the question (body, intent, questions) and its decision state
+   *  (open, blocked or terminal; who it's addressed to or parked on; its answers, a decision made for them, the current park,
+   *  and the replies returned). A label, a wake, a claim or a note on a park doesn't change it; a new park does, on any blocker. */
+  decisionRevision(item: QueueItem): string {
+    const phase = item.state === "blocked" ? "blocked" : item.state === "pending" || item.state === "in-progress" ? "open" : item.state;
+    const replies = this.hasReplyToColumn ? (this.db.prepare("SELECT qitem_id FROM queue_items WHERE reply_to = ? ORDER BY ts_created, rowid")
+      .all(item.qitemId) as Array<{ qitem_id: string }>).map((row) => row.qitem_id) : [];
+    // The park this is: the transition into blocked from another state (a later blocked-to-blocked note stays this park).
+    const transitions = item.state === "blocked" ? this.transitionLog.listForQitem(item.qitemId) : [];
+    let parkEntry: number | null = null;
+    for (let i = transitions.length - 1; i >= 0 && parkEntry === null; i--) {
+      if (transitions[i]!.state === "blocked" && transitions[i - 1]?.state !== "blocked") parkEntry = transitions[i]!.transitionId;
+    }
+    const decision = [item.body, item.humanIntent ?? null, item.humanQuestions ?? null, phase, item.destinationSession, item.blockedOn,
+      item.humanAnswers ?? null, item.delegatedDecision ?? null, this.currentHumanRequiredEpisode(item.qitemId)?.key ?? null, parkEntry, replies];
+    return `dr1-${createHash("sha256").update(JSON.stringify(decision)).digest("hex").slice(0, 24)}`;
+  }
+
   currentHumanRequiredEpisode(qitemId: string): { key: string; receipt: ReturnType<QueueTransitionLog["getOwnerNotificationReceipt"]> } | null {
     const episode = this.transitionLog.listForQitem(qitemId).filter((transition) => transition.ownerNotificationKind === "human-required").at(-1);
     if (!episode) return null;
@@ -4091,6 +4205,10 @@ export class QueueRepository {
   list(opts?: QueueListOptions & { compact?: false }): QueueItem[];
   list(opts?: QueueListOptions): Array<QueueItem | CompactQueueItem>;
   list(opts?: QueueListOptions): Array<QueueItem | CompactQueueItem> {
+    // one recovery index for the whole listing (built on first use) instead of one json_each scan per row
+    return withRecoveryIndex(this.db, () => this.listRows(opts));
+  }
+  private listRows(opts?: QueueListOptions): Array<QueueItem | CompactQueueItem> {
     const limit = opts?.limit ?? 100;
     const conditions: string[] = [];
     const params: unknown[] = [];
@@ -4501,6 +4619,17 @@ export class QueueRepository {
     } catch { return false; }
   }
 
+  /** #514 — a pending explicit informational update addressed to a currently registered human
+   *  (external or canonical alias, regardless of terminal transport) is correspondence for reading,
+   *  not an obligation to claim. Registry unavailable/unregistered and agent destinations read false. */
+  isRegisteredHumanUpdate(row: Pick<QueueItem, "state" | "humanIntent" | "destinationSession">): boolean {
+    if (row.state !== "pending" || row.humanIntent !== "update") return false;
+    try {
+      const registry = this.loadHumanRegistryFn();
+      return registry.ok && resolveRegisteredHumanAddress(row.destinationSession, registry.entities) !== null;
+    } catch { return false; }
+  }
+
   classifyDestinationOf(destinationSession: string): DestinationClass {
     return classifyDestination(destinationSession, {
       entities: (() => {
@@ -4580,6 +4709,8 @@ export class QueueRepository {
       : item.state === "blocked"
         ? resolveRegisteredHumanAddress(item.blockedOn, registry.entities)
         : resolveRegisteredHumanAddress(item.destinationSession, registry.entities);
+    // A person with no connector is reached in the Feed and Steering only: nothing is posted to them, so nothing is owed.
+    if (humanAddress && registry.entities.find((entity) => entity.address === humanAddress)?.connectorBindings.length === 0) return "inactive";
     // An ask placed on Steering without an alert (RECORD) owes no post: its ledger reports a real receipt (a posting
     // dial set to RECORD posts it) and never a missing one.
     return humanAddress
@@ -5010,15 +5141,22 @@ export class QueueRepository {
       // episode (same predicate as runStuckSweep), so the view must not promise that sweep.
       const posted = view.state === "pending" && this.humanNotificationPostedThisEpisode(qitemId, listed);
       const onSteering = !posted && view.state === "pending" && this.humanAskWithoutAlert(qitemId, listed);
-      const row = !posted && !onSteering ? this.db.prepare(`SELECT state, ${this.hasHumanIntentColumn ? "human_intent" : "NULL AS human_intent"}, destination_session, last_nudge_result FROM queue_items WHERE qitem_id = ?`).get(qitemId) as { state: QueueItem["state"]; human_intent: QueueItem["humanIntent"]; destination_session: string; last_nudge_result: string | null } | undefined : undefined;
-      const noticeOutcome = listed ? listed.ledger?.outcome : this.deliveryOutcomeFor(qitemId)?.outcome;
-      const localOnly = !!row && noticeOutcome !== "never-posted" && noticeOutcome !== "transport-failed"
+      const row = view.state === "pending" && !onSteering
+        ? this.db.prepare(`SELECT state, ${this.hasHumanIntentColumn ? "human_intent" : "NULL AS human_intent"}, destination_session, last_nudge_result FROM queue_items WHERE qitem_id = ?`).get(qitemId) as { state: QueueItem["state"]; human_intent: QueueItem["humanIntent"]; destination_session: string; last_nudge_result: string | null } | undefined
+        : undefined;
+      const humanUpdate = !!row && this.isRegisteredHumanUpdate({ state: row.state, humanIntent: row.human_intent, destinationSession: row.destination_session });
+      const noticeOutcome = !posted && !onSteering ? (listed ? listed.ledger?.outcome : this.deliveryOutcomeFor(qitemId)?.outcome) : undefined;
+      const localOnly = !!row && !posted && !humanUpdate && noticeOutcome !== "never-posted" && noticeOutcome !== "transport-failed"
         && this.isLocalHumanDecisionWithoutGateway({ state: row.state, humanIntent: row.human_intent, destinationSession: row.destination_session, lastNudgeResult: row.last_nudge_result });
       const awaitingHuman = posted || onSteering || localOnly;
-      if (awaitingHuman) {
+      if (awaitingHuman || humanUpdate) {
         view.nextBackstop = { owner: view.owner, mechanism: localOnly ? "local attention feed (no registered human gateway)" : onSteering
           ? "none (on Steering for the human, with no Slack alert; awaiting their decision)"
-          : "none (posted to the human; awaiting their decision)", dueAt: null, intervalSeconds: null };
+          : humanUpdate
+            ? posted
+              ? "none (posted to the human; informational correspondence requires no claim)"
+              : "none (informational correspondence to the human; no claim required)"
+            : "none (posted to the human; awaiting their decision)", dueAt: null, intervalSeconds: null };
       }
       // Quiet hours: a held ask is owned by its window's release job until it posts.
       const quiet = awaitingHuman ? null : quietCustodyBackstop(view.owner, quietHoldCustody(this.db, qitemId));
@@ -5028,7 +5166,7 @@ export class QueueRepository {
       }
       const recovery = readWakeLadderBackstop(this.db, qitemId, target => this.acceptsDestination(target));
       if (recovery && !localOnly) {
-        if (!awaitingHuman) view.laterBackstop = { ...view.nextBackstop, note: "Conditional safety net; current delivery/recovery ownership is evaluated first." };
+        if (!awaitingHuman && !humanUpdate) view.laterBackstop = { ...view.nextBackstop, note: "Conditional safety net; current delivery/recovery ownership is evaluated first." };
         view.nextBackstop = recovery;
       } else if (!awaitingHuman && view.state === "pending" && (this.db.prepare("SELECT last_nudge_result FROM queue_items WHERE qitem_id = ?")
         .get(qitemId) as { last_nudge_result: string | null } | undefined)?.last_nudge_result === "retained:typing_guard") {

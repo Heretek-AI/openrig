@@ -369,6 +369,8 @@ export function FeedCard({
   const [selectedScreenshot, setSelectedScreenshot] = useState<string | null>(null);
   // CORRECTIVE §7.1 — CHAT quick-action state (the shared terminal, per BR-12).
   const [chatOpen, setChatOpen] = useState(false);
+  // F17 (#2417) — expand multiline event bodies beyond the one-line preview.
+  const [bodyExpanded, setBodyExpanded] = useState(false);
   const dragStateRef = useRef<{ startX: number; pointerId: number; isTouch: boolean } | null>(null);
 
   const handleKeyDown: React.KeyboardEventHandler<HTMLElement> = (event) => {
@@ -409,6 +411,15 @@ export function FeedCard({
     onDismiss(card);
   };
   const qitemViewerData = qitemViewerDataFromItem(card, queueItem);
+  const payload = card.source.payload ?? {};
+  // Remote cards must use their origin's payload, not a same-id local queue row.
+  const localItem = !card.hostId || card.hostId === "local" ? queueItem : undefined;
+  const hasQuestions = (Array.isArray(payload.humanQuestions) && payload.humanQuestions.length > 0)
+    || (Array.isArray(localItem?.humanQuestions) && localItem.humanQuestions.length > 0);
+  // Event cards can arrive before the queue read. Do not offer a closing action until it resolves.
+  const questionsKnown = localItem !== undefined || Object.hasOwn(payload, "humanQuestions");
+  const permissionTags = localItem ? localItem.tags : payload.tags;
+  const isRunnerPermission = Array.isArray(permissionTags) && permissionTags.includes("runner-permission");
   const body = compactQueueBody(queueItem?.body || card.body);
   const tags = queueItem?.tags ?? qitemViewerData?.tags ?? [];
   const source = qitemViewerData?.source ?? card.authorSession;
@@ -452,10 +463,23 @@ export function FeedCard({
             {card.title}
           </h3>
           {body ? (
-            // Muted one-line body preview.
-            <p className="mt-0.5 truncate text-sm text-on-surface-variant">
-              {body.split("\n")[0]}
-            </p>
+            <>
+              {/* Muted one-line body preview; expandable when multiline. */}
+              <p className={`mt-0.5 text-sm text-on-surface-variant${bodyExpanded ? "" : " truncate"}`}>
+                {bodyExpanded ? body : body.split("\n")[0]}
+              </p>
+              {body.includes("\n") && (
+                <button
+                  type="button"
+                  data-testid={`feed-card-expand-body-${card.id}`}
+                  aria-expanded={bodyExpanded}
+                  onClick={() => setBodyExpanded((v) => !v)}
+                  className="text-xs text-on-surface underline hover:text-on-surface-variant"
+                >
+                  {bodyExpanded ? "Show less" : "Show more"}
+                </button>
+              )}
+            </>
           ) : null}
           <div className="mt-1 flex min-w-0 items-center gap-2">
             {/* Author session in mono. */}
@@ -520,13 +544,12 @@ export function FeedCard({
           <div
             data-testid={`feed-card-actions-${card.id}`}
           >
-            {/* CORRECTIVE §7.1 + founder live-review 2026-07-05: JUST the two
-                buttons — APPROVE (one-tap, the existing verb + write path) and
-                CHAT (the shared terminal, preamble per BR-12). No "Your turn"
-                prose, no "Choose response" chrome (VerbActions `bare`) —
-                buttons are self-evident. Deny/route stay retired. */}
+            {/* CORRECTIVE §7.1 + founder live-review 2026-07-05: bare APPROVE
+                and CHAT only. Questions require answers in the TUI: Approve would
+                close the ask without returning them. Runner permission asks
+                retain Approve because their runner reads that closure as allow. */}
             <div className="flex flex-wrap items-center gap-2">
-              <VerbActions
+              {questionsKnown && (!hasQuestions || isRunnerPermission) ? <VerbActions
                 qitemId={qitemViewerData.qitemId}
                 actorSession={actorSession}
                 bare
@@ -538,7 +561,13 @@ export function FeedCard({
                     ? (outcome) => onOptimisticOutcome(qitemViewerData.qitemId, outcome)
                     : undefined
                 }
-              />
+              /> : hasQuestions ? (
+                <span className="font-mono text-[10px] text-on-surface-variant break-words min-w-0">
+                  {card.hostId && card.hostId !== "local"
+                    ? `This ask has questions. Answer in the TUI on host ${card.hostId} (rig tui).`
+                    : `This ask has questions. Answer in the TUI (rig tui)${terminalSession ? `, or tell ${terminalSession} in Chat.` : "."}`}
+                </span>
+              ) : null}
               <button
                 type="button"
                 data-testid={`feed-card-chat-${card.id}`}

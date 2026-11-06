@@ -232,6 +232,7 @@ export interface InboundDeps {
 
 export class InboundRouter {
   private readonly inflight = new Set<string>(); // same-channel message identity double-dispatch guard
+  private relayAttemptsInFlight = 0;
   private readonly replyingTo = new Set<string>(); // click replies being posted now
   private retryPass: Promise<{ retried: number; landed: number }> | undefined;
   private readonly botApps = new Map<string, string>(); // bot_id → its app, from bots.info
@@ -245,6 +246,15 @@ export class InboundRouter {
   private readonly botLimiter: BotLimiter;
   constructor(private readonly deps: InboundDeps) {
     this.botLimiter = new BotLimiter(deps.now);
+  }
+
+  /** Point-in-time local HTTP attempts, independent of durable retained records. */
+  getRelayAttemptsInFlight(): number { return this.relayAttemptsInFlight; }
+
+  private async sendForward(host: string, env: SocketEnvelope): Promise<Awaited<ReturnType<EnvelopeForwarder>>> {
+    this.relayAttemptsInFlight++;
+    try { return await this.deps.forward!.send(host, env); }
+    finally { this.relayAttemptsInFlight--; }
   }
 
   /** The row's summary names the person who actually wrote (their registered address); its tags stay as they were. */
@@ -375,7 +385,10 @@ export class InboundRouter {
       const resumedPark = correlated?.state === "in-progress";
       const askOpen = correlated?.state === "pending" || parkOpen;
       const closed = correlated?.state === "done" || correlated?.state === "handed-off";
-      const answerable = !ev.recoveredThreadReply && !asChannel && route.correlationQitemId !== undefined;
+      // A reply routed to another person (a root recorded with a person as its seat) isn't an answer to the asker: it stays
+      // words for whoever it reached.
+      const settles = route.correlationQitemId === undefined || this.deps.queue.routesToAsker?.(route.correlationQitemId, route.destination) !== false;
+      const answerable = !ev.recoveredThreadReply && !asChannel && route.correlationQitemId !== undefined && settles;
       // An absorbed event has its own identity even when the first answer came from a button or Steering.
       const consumedKey = (answerId: string) => `answer-event:${JSON.stringify([eventId, route.correlationQitemId, who.source, answerId])}`;
       // A closed ask can hold several returned answers (one per park). A replay finds the one this event returned, or the
@@ -416,14 +429,14 @@ export class InboundRouter {
           summary,
           body,
           ...(route.correlationQitemId ? { inReplyTo: route.correlationQitemId } : {}),
-          ...(askOpen && !ev.recoveredThreadReply && !asChannel ? { humanAnswer: true, typedReply: true } : {}),
+          ...(askOpen && answerable ? { humanAnswer: true } : {}),
         });
       } catch (e) {
         this.deps.log?.(`qitem create failed ts=${ts}: ${(e as Error).message}`);
         return { landed: false, reason: "create_failed" };
       }
       let replyResolution: "resolved" | "resolved-uncertain" | "already-resolved" | "not-applicable" | undefined;
-      if (!closed && route.correlationQitemId && this.deps.resolveHumanReply && !ev.recoveredThreadReply && !asChannel) {
+      if (!closed && route.correlationQitemId && this.deps.resolveHumanReply && answerable) {
         try {
           // Reusing the durable answer consumed this event's words. Record that before close, but
           // keep the raw event unmarked until completion so an interrupted close can still retry.
@@ -560,7 +573,10 @@ export class InboundRouter {
       if (live) await acknowledge(CLICK_REPLIES.unmapped);
       return { status: "ignored", reason: "unmapped-message" };
     }
-    const existing = this.deps.queue.getHumanAnswer?.(qitemId, who.source);
+    // A decision parked on this person takes the current question's answer, as a typed reply does: a re-park gets its own.
+    const parkOpen = this.deps.queue.getQitem?.(qitemId)?.state === "blocked"
+      && this.deps.queue.answersPark?.(qitemId, who.source, action?.action_ts) === true;
+    const existing = parkOpen ? this.deps.queue.getEpisodeAnswer?.(qitemId, who.source) : this.deps.queue.getHumanAnswer?.(qitemId, who.source);
     if (existing) {
       try {
         const resolution = await this.deps.resolveHumanReply?.({ qitemId, actorSession: who.source, decision: humanAnswerText(existing.body), messageTs: action?.action_ts });
@@ -579,10 +595,16 @@ export class InboundRouter {
     const recorded = this.deps.recordHumanAnswer?.({ qitemId, actorSession: who.source, ...picked, clickedTs: action?.action_ts });
     if (!recorded || recorded.status !== "recorded") {
       const reason = recorded?.reason ?? "answers-unavailable";
+      // Another person's committed answer is the answer: a park on the person resumes with it through the resolver.
+      if (recorded?.answeredBy) {
+        try { await this.deps.resolveHumanReply?.({ qitemId, actorSession: who.source, decision: "", messageTs: action?.action_ts }); }
+        catch (e) { this.deps.log?.(`answer continuation failed qitem=${qitemId}: ${(e as Error).message}`); }
+      }
       // A closed decision holding this person's clicked answer: typically Slack's redelivery of the click that closed
       // it, after that click's own confirmation failed to post. It was recorded, so say that.
       if (live) {
         await acknowledge(recorded?.answerOnRecord ? CLICK_REPLIES.onRecord
+          : recorded?.answeredBy ? escapeSlackText(`${recorded.answeredBy} already answered this, so your choice wasn't recorded.`)
           : recorded?.decidedForThem ? escapeSlackText(redactSecrets(decidedForThemReply(recorded.decidedForThem))) : clickNotRecordedReply(reason));
       }
       return { status: "ignored", reason };
@@ -897,7 +919,7 @@ export class InboundRouter {
   /** Relay an envelope to the machine that owns its channel. The hub has already acknowledged it to
    *  Slack, so a failed relay is kept with its host and retried, never dropped. */
   async forwardEnvelope(host: string, env: SocketEnvelope): Promise<{ status: InboundDisposition; reason?: string }> {
-    const r = await this.deps.forward!.send(host, env);
+    const r = await this.sendForward(host, env);
     const channel = envelopeChannel(env) ?? "-";
     if (r.ok) {
       this.deps.log?.(`forwarded ${env.type} channel=${channel} -> ${host}`);
@@ -924,7 +946,7 @@ export class InboundRouter {
     for (const e of entries) {
       if (failedHosts.has(e.ev.host)) { stillFailing.push(e); continue; }
       sent++;
-      const r = await this.deps.forward.send(e.ev.host, e.ev.envelope);
+      const r = await this.sendForward(e.ev.host, e.ev.envelope);
       if (r.ok) landed++;
       else { failedHosts.add(e.ev.host); stillFailing.push({ ev: e.ev, at: e.at, attempts: e.attempts + 1 }); }
     }
